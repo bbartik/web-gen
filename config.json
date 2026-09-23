@@ -1,0 +1,213 @@
+{
+  "_comment": "FortiGate lab web-filter / AV test target list. Each category has an 'expect' hint (block|allow|mixed) used only for reporting. Toggle a whole category off with \"enabled\": false. Edit freely for your lab.",
+
+  "categories": {
+
+    "av_malware_eicar": {
+      "enabled": true,
+      "expect": "block",
+      "note": "EICAR anti-malware test files. Harmless. FortiGate AV should block the download.",
+      "urls": [
+        "https://secure.eicar.org/eicar.com",
+        "https://secure.eicar.org/eicar.com.txt",
+        "https://secure.eicar.org/eicar_com.zip",
+        "https://secure.eicar.org/eicarcom2.zip",
+        "http://www.eicar.org/download/eicar.com",
+        "http://www.eicar.org/download/eicar.com.txt",
+        "http://2016.eicar.org/download/eicar.com.txt"
+      ]
+    },
+
+    "av_amtso": {
+      "enabled": true,
+      "expect": "block",
+      "note": "AMTSO (Anti-Malware Testing Standards Org) feature-check downloads.",
+      "urls": [
+        "https://www.amtso.org/download/eicar-standard-antivirus-test-file/",
+        "https://www.amtso.org/download/eicar-standard-antivirus-test-file-with-alternate-extension/",
+        "https://www.amtso.org/download/eicar-compressed-standard-antivirus-test-file/",
+        "https://www.amtso.org/download/eicar-double-compressed-standard-antivirus-test-file/",
+        "https://www.amtso.org/feature-settings-check-download-of-potentially-unwanted-applications/",
+        "https://www.amtso.org/feature-settings-check-compressed-potentially-unwanted-application/"
+      ]
+    },
+
+    "malicious_exploit": {
+      "enabled": true,
+      "expect": "block",
+      "note": "WICAR drive-by / exploit test pages and IDS signature triggers. Harmless test payloads.",
+      "urls": [
+        "http://www.wicar.org/data/eicar.com.txt",
+        "http://www.wicar.org/data/ms03_020_ie_objecttype.html",
+        "http://www.wicar.org/data/java_jre17_exec.html",
+        "http://www.wicar.org/data/pdf_exploit.html",
+        "http://www.wicar.org/test-malware.html",
+        "http://testmyids.com/",
+        "http://www.testmyids.com/",
+        "https://testmyids.com/"
+      ]
+    },
+
+    "phishing": {
+      "enabled": true,
+      "expect": "block",
+      "note": "AMTSO phishing feature check + known phishing test hosts.",
+      "urls": [
+        "https://www.amtso.org/feature-settings-check-phishing-page/",
+        "https://testsafebrowsing.appspot.com/s/phishing.html",
+        "https://testsafebrowsing.appspot.com/s/malware.html",
+        "https://testsafebrowsing.appspot.com/s/unwanted.html"
+      ]
+    },
+
+    "gambling": {
+      "enabled": true,
+      "expect": "block",
+      "urls": [
+        "https://www.bet365.com/",
+        "https://www.pokerstars.com/",
+        "https://www.williamhill.com/",
+        "https://www.888casino.com/",
+        "https://www.bovada.lv/",
+        "https://www.draftkings.com/",
+        "https://www.fanduel.com/",
+        "https://www.betfair.com/",
+        "https://www.paddypower.com/",
+        "https://www.ladbrokes.com/",
+        "https://www.pokerstarscasino.com/",
+        "https://www.partypoker.com/"
+      ]
+    },
+
+    "hacking": {
+      "enabled": true,
+      "expect": "block",
+      "urls": [
+        "https://www.hackthissite.org/",
+        "https://www.exploit-db.com/",
+        "https://www.metasploit.com/",
+        "https://www.offensive-security.com/",
+        "https://packetstormsecurity.com/",
+        "https://www.hackthebox.com/",
+        "https://tryhackme.com/",
+        "https://www.kali.org/",
+        "https://seclists.org/",
+        "https://gtfobins.github.io/",
+        "https://www.rapid7.com/db/"
+      ]
+    },
+
+    "proxy_avoidance": {
+      "enabled": true,
+      "expect": "block",
+      "note": "Anonymizers, proxies, Tor. Common 'proxy avoidance and anonymizers' category.",
+      "urls": [
+        "https://www.torproject.org/",
+        "https://www.hidemyass.com/",
+        "https://hide.me/",
+        "https://www.proxysite.com/",
+        "https://www.kproxy.com/",
+        "https://www.megaproxy.com/",
+        "https://www.4everproxy.com/",
+        "https://www.psiphon3.com/",
+        "https://ultrasurf.us/",
+        "https://www.zenmate.com/"
+      ]
+    },
+
+    "adult": {
+      "enabled": false,
+      "expect": "block",
+      "note": "Adult / pornography category. DISABLED by default. Populate with your own targets if your lab policy requires testing this category.",
+      "urls": []
+    },
+
+    "drugs": {
+      "enabled": true,
+      "expect": "block",
+      "note": "Marijuana / drug advocacy category.",
+      "urls": [
+        "https://www.leafly.com/",
+        "https://www.weedmaps.com/",
+        "https://norml.org/",
+        "https://www.hightimes.com/",
+        "https://www.erowid.org/"
+      ]
+    },
+
+    "weapons": {
+      "enabled": true,
+      "expect": "block",
+      "urls": [
+        "https://www.budsgunshop.com/",
+        "https://www.gunbroker.com/",
+        "https://www.cheaperthandirt.com/",
+        "https://www.palmettostatearmory.com/"
+      ]
+    },
+
+    "warez_p2p": {
+      "enabled": true,
+      "expect": "block",
+      "note": "File sharing / freeware / torrent category.",
+      "urls": [
+        "https://thepiratebay.org/",
+        "https://1337x.to/",
+        "https://rarbg.to/",
+        "https://www.limetorrents.lol/",
+        "https://transmissionbt.com/",
+        "https://www.qbittorrent.org/"
+      ]
+    },
+
+    "malware_hosting_dyndns": {
+      "enabled": true,
+      "expect": "mixed",
+      "note": "Dynamic DNS + URL categorization test lookups.",
+      "urls": [
+        "http://no-ip.com/",
+        "https://www.duckdns.org/",
+        "https://www.noip.com/",
+        "https://url.fortinet.net/rate/submit.php"
+      ]
+    },
+
+    "streaming_social": {
+      "enabled": true,
+      "expect": "mixed",
+      "note": "High-bandwidth + social. Usually allowed; good for baseline volume & app control.",
+      "urls": [
+        "https://www.youtube.com/",
+        "https://www.netflix.com/",
+        "https://www.twitch.tv/",
+        "https://www.tiktok.com/",
+        "https://www.facebook.com/",
+        "https://www.instagram.com/",
+        "https://x.com/",
+        "https://www.reddit.com/",
+        "https://www.linkedin.com/",
+        "https://www.spotify.com/"
+      ]
+    },
+
+    "benign_baseline": {
+      "enabled": true,
+      "expect": "allow",
+      "note": "Clean, high-reputation sites for baseline allowed traffic.",
+      "urls": [
+        "https://www.google.com/",
+        "https://www.microsoft.com/",
+        "https://www.wikipedia.org/",
+        "https://www.github.com/",
+        "https://www.cloudflare.com/",
+        "https://www.amazon.com/",
+        "https://www.apple.com/",
+        "https://www.cnn.com/",
+        "https://www.bbc.com/",
+        "https://www.stackoverflow.com/",
+        "https://www.nytimes.com/",
+        "https://www.office.com/"
+      ]
+    }
+  }
+}
