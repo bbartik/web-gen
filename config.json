@@ -209,5 +209,43 @@
         "https://www.office.com/"
       ]
     }
+  },
+
+  "dns": {
+    "_comment": "DNS traffic for FortiGate DNS filtering + Botnet C&C / DGA detection. Queries use the OS-configured resolver (through the FortiGate) unless --servers is given.",
+    "record_types": ["A", "AAAA"],
+    "block_ips": ["208.91.112.55", "208.91.112.52", "208.91.112.53"],
+
+    "dga": {
+      "enabled": true,
+      "count": 300,
+      "min_len": 12,
+      "max_len": 22,
+      "tlds": [".com", ".net", ".org", ".info", ".biz", ".ru", ".cn", ".xyz", ".top", ".club", ".online", ".site", ".su", ".cc", ".ws"]
+    },
+
+    "suspicious_domains": [
+      "malware.wicar.org",
+      "test.malware.com",
+      "botnet-c2-test.xyz",
+      "phishing-test-domain.tk",
+      "free-money-now-guaranteed.info",
+      "secure-login-verify-account.top",
+      "update-flash-player-now.ru",
+      "kj3h4kj2h34kjh234kjh.biz",
+      "no-ip.com",
+      "duckdns.org"
+    ],
+
+    "benign_domains": [
+      "google.com",
+      "microsoft.com",
+      "cloudflare.com",
+      "github.com",
+      "wikipedia.org",
+      "amazon.com",
+      "apple.com",
+      "office.com"
+    ]
   }
 }

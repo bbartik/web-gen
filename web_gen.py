@@ -34,6 +34,8 @@ try:
 except ImportError:
     sys.exit("aiohttp is required. Activate your venv and run: pip install -r requirements.txt")
 
+import dns_gen  # noqa: E402  (also sets the Windows selector loop policy aiodns needs)
+
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -162,24 +164,38 @@ async def run(args):
     config_path = Path(args.config)
     if not config_path.is_absolute():
         config_path = Path(__file__).parent / config_path
-    targets, selected = load_targets(config_path, args.categories)
 
-    if not targets:
-        sys.exit("No targets selected. Check --categories or enable some in config.json.")
+    with config_path.open(encoding="utf-8") as fh:
+        full_cfg = json.load(fh)
+    dns_cfg = full_cfg.get("dns", {})
+    do_dns = args.dns or args.dns_only
+
+    targets, selected = ([], {})
+    if not args.dns_only:
+        targets, selected = load_targets(config_path, args.categories)
+        if not targets:
+            sys.exit("No HTTP targets selected. Check --categories or enable some in config.json.")
 
     print("=" * 70)
     print("FortiGate lab web traffic generator")
     print("=" * 70)
-    for name, count in selected.items():
-        print(f"  {name:26} {count:3} url(s)")
-    print(f"\n  targets/pass : {len(targets)}")
+    if not args.dns_only:
+        for name, count in selected.items():
+            print(f"  {name:26} {count:3} url(s)")
+        print(f"\n  http targets/pass : {len(targets)}")
+    if do_dns:
+        n_dns = len(dns_gen.build_domain_list(dns_cfg, dga_count=args.dga_count))
+        print(f"  dns queries/pass  : {n_dns} "
+              f"(dga + suspicious + benign)")
     print(f"  concurrency  : {args.concurrency}")
     mode = f"loop for {args.duration}s" if args.loop else f"{args.iterations} iteration(s)"
     print(f"  mode         : {mode}")
-    print(f"  cache-bust   : {args.cache_bust}   full-download: {args.full_download}")
+    if not args.dns_only:
+        print(f"  cache-bust   : {args.cache_bust}   full-download: {args.full_download}")
     print("=" * 70)
 
     stats = Stats()
+    dns_stats = dns_gen.DnsStats()
     sem = asyncio.Semaphore(args.concurrency)
     timeout = aiohttp.ClientTimeout(total=args.timeout)
     connector = aiohttp.TCPConnector(limit=args.concurrency, ssl=False, force_close=True)
@@ -189,14 +205,21 @@ async def run(args):
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         while True:
             passes += 1
-            batch = list(targets)
-            if args.shuffle:
-                random.shuffle(batch)
-            tasks = [
-                asyncio.create_task(fetch(session, sem, cat, url, expect, stats, args))
-                for cat, url, expect in batch
-            ]
-            await asyncio.gather(*tasks)
+            if not args.dns_only:
+                batch = list(targets)
+                if args.shuffle:
+                    random.shuffle(batch)
+                tasks = [
+                    asyncio.create_task(fetch(session, sem, cat, url, expect, stats, args))
+                    for cat, url, expect in batch
+                ]
+                await asyncio.gather(*tasks)
+
+            if do_dns:
+                await dns_gen.run_dns_phase(
+                    dns_cfg, concurrency=args.concurrency, timeout=args.timeout,
+                    dga_count=args.dga_count, verbose=args.verbose, stats=dns_stats,
+                )
 
             if args.delay:
                 await asyncio.sleep(args.delay)
@@ -210,7 +233,10 @@ async def run(args):
                     break
 
     elapsed = time.monotonic() - start
-    print_report(stats, elapsed, passes)
+    if not args.dns_only:
+        print_report(stats, elapsed, passes)
+    if do_dns:
+        dns_gen.print_dns_report(dns_stats)
 
 
 def print_report(stats: Stats, elapsed: float, passes: int):
@@ -281,6 +307,12 @@ def parse_args():
                    help="Do not follow HTTP redirects.")
     p.add_argument("--shuffle", action="store_true",
                    help="Shuffle target order each pass.")
+    p.add_argument("--dns", action="store_true",
+                   help="Also run a DNS/DGA query phase each pass (DNS filtering + Botnet C&C test).")
+    p.add_argument("--dns-only", action="store_true",
+                   help="Run only the DNS/DGA phase; skip HTTP entirely.")
+    p.add_argument("--dga-count", type=int, default=None,
+                   help="Override number of DGA domains generated per pass.")
     p.add_argument("--verbose", "-v", action="store_true",
                    help="Print every request result.")
     p.add_argument("--list", action="store_true",

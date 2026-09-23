@@ -54,6 +54,47 @@ python web_gen.py --categories av_malware_eicar av_amtso --full-download -v
 | `--no-cache-bust` | Don't append a random query param to each URL. |
 | `-v` / `--verbose` | Print every request with its block/ok/err verdict. |
 
+## DNS / DGA traffic (FortiGate DNS filtering + Botnet C&C detection)
+
+[dns_gen.py](dns_gen.py) fires large volumes of DNS queries to exercise FortiGate
+**DNS filtering** and **Botnet C&C / DGA detection**. It resolves through the OS's
+configured DNS server (i.e. through the FortiGate) using `aiodns` (c-ares) for real
+async scale.
+
+It generates three kinds of domains (see the `dns` section of [config.json](config.json)):
+
+- **DGA** — algorithmically generated domains in three styles that mirror real
+  botnet families: high-entropy random (Conficker/Necurs), **date-seeded**
+  deterministic (CryptoLocker-style — same date produces the same list), and
+  dictionary-word (matsnu/suppobox). Most return **NXDOMAIN**, which is exactly the
+  beaconing pattern DGA detection flags.
+- **suspicious** — a curated list of dodgy-looking / dynamic-DNS test domains.
+- **benign** — clean domains for baseline.
+
+Blocking is detected as **NXDOMAIN vs resolved**, and — when the FortiGate DNS filter
+redirects a blocked lookup to a FortiGuard portal IP — as **blocked** (the
+`block_ips` list in config, default `208.91.112.55/.52/.53`).
+
+```powershell
+# Integrated: run HTTP + DNS together
+python web_gen.py --dns --loop --duration 300 --concurrency 200
+
+# DNS only, 500 DGA domains
+python web_gen.py --dns-only --dga-count 500 --concurrency 300
+
+# Standalone module, verbose
+python dns_gen.py --dga-count 500 -v
+
+# Just preview the domains it would generate
+python dns_gen.py --sample --dga-count 30
+
+# Point at a specific resolver instead of the OS default
+python dns_gen.py --servers 208.91.112.220 -v
+```
+
+Relevant flags: `--dns`, `--dns-only`, `--dga-count N`. Tune counts, TLDs, and the
+domain lists in the `dns` section of `config.json`.
+
 ## Block detection
 
 The tool sniffs the first 4 KB of each response for FortiGate block-page markers
