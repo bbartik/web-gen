@@ -1,11 +1,10 @@
 {
-  "_comment": "FortiGate lab web-filter / AV test target list. Each category has an 'expect' hint (block|allow|mixed) used only for reporting. Toggle a whole category off with \"enabled\": false. Edit freely for your lab.",
-
+  "_comment": "FortiGate lab web-filter / AV test target list. 'expect' (block|allow|mixed) is a reporting hint. 'weight' is relative hit frequency (higher = hit more often; normal traffic is weighted up). Toggle a category with \"enabled\": false. Edit freely for your lab.",
   "categories": {
-
     "av_malware_eicar": {
       "enabled": true,
       "expect": "block",
+      "weight": 1,
       "note": "EICAR anti-malware test files. Harmless. FortiGate AV should block the download.",
       "urls": [
         "https://secure.eicar.org/eicar.com",
@@ -17,10 +16,10 @@
         "http://2016.eicar.org/download/eicar.com.txt"
       ]
     },
-
     "av_amtso": {
       "enabled": true,
       "expect": "block",
+      "weight": 1,
       "note": "AMTSO (Anti-Malware Testing Standards Org) feature-check downloads.",
       "urls": [
         "https://www.amtso.org/download/eicar-standard-antivirus-test-file/",
@@ -31,10 +30,10 @@
         "https://www.amtso.org/feature-settings-check-compressed-potentially-unwanted-application/"
       ]
     },
-
     "malicious_exploit": {
       "enabled": true,
       "expect": "block",
+      "weight": 1,
       "note": "WICAR drive-by / exploit test pages and IDS signature triggers. Harmless test payloads.",
       "urls": [
         "http://www.wicar.org/data/eicar.com.txt",
@@ -47,10 +46,10 @@
         "https://testmyids.com/"
       ]
     },
-
     "phishing": {
       "enabled": true,
       "expect": "block",
+      "weight": 1,
       "note": "AMTSO phishing feature check + known phishing test hosts.",
       "urls": [
         "https://www.amtso.org/feature-settings-check-phishing-page/",
@@ -59,10 +58,10 @@
         "https://testsafebrowsing.appspot.com/s/unwanted.html"
       ]
     },
-
     "gambling": {
       "enabled": true,
       "expect": "block",
+      "weight": 1,
       "urls": [
         "https://www.bet365.com/",
         "https://www.pokerstars.com/",
@@ -78,10 +77,10 @@
         "https://www.partypoker.com/"
       ]
     },
-
     "hacking": {
       "enabled": true,
       "expect": "block",
+      "weight": 1,
       "urls": [
         "https://www.hackthissite.org/",
         "https://www.exploit-db.com/",
@@ -96,10 +95,10 @@
         "https://www.rapid7.com/db/"
       ]
     },
-
     "proxy_avoidance": {
       "enabled": true,
       "expect": "block",
+      "weight": 1,
       "note": "Anonymizers, proxies, Tor. Common 'proxy avoidance and anonymizers' category.",
       "urls": [
         "https://www.torproject.org/",
@@ -114,17 +113,17 @@
         "https://www.zenmate.com/"
       ]
     },
-
     "adult": {
       "enabled": false,
       "expect": "block",
+      "weight": 1,
       "note": "Adult / pornography category. DISABLED by default. Populate with your own targets if your lab policy requires testing this category.",
       "urls": []
     },
-
     "drugs": {
       "enabled": true,
       "expect": "block",
+      "weight": 1,
       "note": "Marijuana / drug advocacy category.",
       "urls": [
         "https://www.leafly.com/",
@@ -134,10 +133,10 @@
         "https://www.erowid.org/"
       ]
     },
-
     "weapons": {
       "enabled": true,
       "expect": "block",
+      "weight": 1,
       "urls": [
         "https://www.budsgunshop.com/",
         "https://www.gunbroker.com/",
@@ -145,10 +144,10 @@
         "https://www.palmettostatearmory.com/"
       ]
     },
-
     "warez_p2p": {
       "enabled": true,
       "expect": "block",
+      "weight": 1,
       "note": "File sharing / freeware / torrent category.",
       "urls": [
         "https://thepiratebay.org/",
@@ -159,10 +158,10 @@
         "https://www.qbittorrent.org/"
       ]
     },
-
     "malware_hosting_dyndns": {
       "enabled": true,
       "expect": "mixed",
+      "weight": 2,
       "note": "Dynamic DNS + URL categorization test lookups.",
       "urls": [
         "http://no-ip.com/",
@@ -171,10 +170,10 @@
         "https://url.fortinet.net/rate/submit.php"
       ]
     },
-
     "streaming_social": {
       "enabled": true,
       "expect": "mixed",
+      "weight": 6,
       "note": "High-bandwidth + social. Usually allowed; good for baseline volume & app control.",
       "urls": [
         "https://www.youtube.com/",
@@ -189,10 +188,10 @@
         "https://www.spotify.com/"
       ]
     },
-
     "benign_baseline": {
       "enabled": true,
       "expect": "allow",
+      "weight": 6,
       "note": "Clean, high-reputation sites for baseline allowed traffic.",
       "urls": [
         "https://www.google.com/",
@@ -208,22 +207,231 @@
         "https://www.nytimes.com/",
         "https://www.office.com/"
       ]
+    },
+    "news_media": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 5,
+      "urls": [
+        "https://www.reuters.com/",
+        "https://apnews.com/",
+        "https://www.theguardian.com/",
+        "https://www.washingtonpost.com/",
+        "https://www.wsj.com/",
+        "https://www.forbes.com/",
+        "https://www.bloomberg.com/",
+        "https://www.npr.org/",
+        "https://www.aljazeera.com/",
+        "https://www.usatoday.com/"
+      ]
+    },
+    "shopping_ecommerce": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 5,
+      "urls": [
+        "https://www.ebay.com/",
+        "https://www.walmart.com/",
+        "https://www.target.com/",
+        "https://www.bestbuy.com/",
+        "https://www.etsy.com/",
+        "https://www.aliexpress.com/",
+        "https://www.homedepot.com/",
+        "https://www.costco.com/",
+        "https://www.wayfair.com/",
+        "https://www.newegg.com/"
+      ]
+    },
+    "finance_banking": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 5,
+      "urls": [
+        "https://www.chase.com/",
+        "https://www.bankofamerica.com/",
+        "https://www.wellsfargo.com/",
+        "https://www.paypal.com/",
+        "https://www.fidelity.com/",
+        "https://www.schwab.com/",
+        "https://www.americanexpress.com/",
+        "https://www.capitalone.com/",
+        "https://investor.vanguard.com/",
+        "https://www.citi.com/"
+      ]
+    },
+    "technology": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 5,
+      "urls": [
+        "https://arstechnica.com/",
+        "https://www.theverge.com/",
+        "https://techcrunch.com/",
+        "https://www.wired.com/",
+        "https://www.engadget.com/",
+        "https://www.cnet.com/",
+        "https://www.tomshardware.com/",
+        "https://www.zdnet.com/",
+        "https://slashdot.org/",
+        "https://www.docker.com/"
+      ]
+    },
+    "education": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 4,
+      "urls": [
+        "https://www.coursera.org/",
+        "https://www.edx.org/",
+        "https://www.khanacademy.org/",
+        "https://www.mit.edu/",
+        "https://www.harvard.edu/",
+        "https://www.stanford.edu/",
+        "https://www.udemy.com/",
+        "https://www.duolingo.com/",
+        "https://www.ted.com/",
+        "https://www.britannica.com/"
+      ]
+    },
+    "health_medicine": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 4,
+      "urls": [
+        "https://www.mayoclinic.org/",
+        "https://www.webmd.com/",
+        "https://www.nih.gov/",
+        "https://www.cdc.gov/",
+        "https://www.healthline.com/",
+        "https://www.who.int/",
+        "https://medlineplus.gov/",
+        "https://my.clevelandclinic.org/"
+      ]
+    },
+    "travel": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 5,
+      "urls": [
+        "https://www.expedia.com/",
+        "https://www.booking.com/",
+        "https://www.airbnb.com/",
+        "https://www.tripadvisor.com/",
+        "https://www.kayak.com/",
+        "https://www.marriott.com/",
+        "https://www.delta.com/",
+        "https://www.united.com/",
+        "https://www.hotels.com/",
+        "https://www.southwest.com/"
+      ]
+    },
+    "sports": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 5,
+      "urls": [
+        "https://www.espn.com/",
+        "https://www.nba.com/",
+        "https://www.nfl.com/",
+        "https://www.mlb.com/",
+        "https://bleacherreport.com/",
+        "https://www.skysports.com/",
+        "https://www.cbssports.com/",
+        "https://www.foxsports.com/",
+        "https://olympics.com/"
+      ]
+    },
+    "government": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 3,
+      "urls": [
+        "https://www.usa.gov/",
+        "https://www.irs.gov/",
+        "https://www.whitehouse.gov/",
+        "https://www.state.gov/",
+        "https://www.nasa.gov/",
+        "https://www.uscis.gov/",
+        "https://www.ssa.gov/",
+        "https://www.gov.uk/"
+      ]
+    },
+    "food_dining": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 4,
+      "urls": [
+        "https://www.allrecipes.com/",
+        "https://www.foodnetwork.com/",
+        "https://www.yelp.com/",
+        "https://www.doordash.com/",
+        "https://www.ubereats.com/",
+        "https://www.opentable.com/",
+        "https://www.epicurious.com/"
+      ]
+    },
+    "automotive": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 3,
+      "urls": [
+        "https://www.cars.com/",
+        "https://www.autotrader.com/",
+        "https://www.carmax.com/",
+        "https://www.edmunds.com/",
+        "https://www.tesla.com/",
+        "https://www.ford.com/",
+        "https://www.toyota.com/"
+      ]
+    },
+    "jobs_career": {
+      "enabled": true,
+      "expect": "allow",
+      "weight": 3,
+      "urls": [
+        "https://www.indeed.com/",
+        "https://www.glassdoor.com/",
+        "https://www.monster.com/",
+        "https://www.ziprecruiter.com/",
+        "https://www.dice.com/",
+        "https://www.careerbuilder.com/"
+      ]
     }
   },
-
   "dns": {
     "_comment": "DNS traffic for FortiGate DNS filtering + Botnet C&C / DGA detection. Queries use the OS-configured resolver (through the FortiGate) unless --servers is given.",
-    "record_types": ["A", "AAAA"],
-    "block_ips": ["208.91.112.55", "208.91.112.52", "208.91.112.53"],
-
+    "record_types": [
+      "A",
+      "AAAA"
+    ],
+    "block_ips": [
+      "208.91.112.55",
+      "208.91.112.52",
+      "208.91.112.53"
+    ],
     "dga": {
       "enabled": true,
       "count": 300,
       "min_len": 12,
       "max_len": 22,
-      "tlds": [".com", ".net", ".org", ".info", ".biz", ".ru", ".cn", ".xyz", ".top", ".club", ".online", ".site", ".su", ".cc", ".ws"]
+      "tlds": [
+        ".com",
+        ".net",
+        ".org",
+        ".info",
+        ".biz",
+        ".ru",
+        ".cn",
+        ".xyz",
+        ".top",
+        ".club",
+        ".online",
+        ".site",
+        ".su",
+        ".cc",
+        ".ws"
+      ]
     },
-
     "suspicious_domains": [
       "malware.wicar.org",
       "test.malware.com",
@@ -236,7 +444,6 @@
       "no-ip.com",
       "duckdns.org"
     ],
-
     "benign_domains": [
       "google.com",
       "microsoft.com",

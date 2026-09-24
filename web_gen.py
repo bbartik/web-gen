@@ -74,7 +74,7 @@ def load_targets(config_path: Path, only: list[str] | None):
     with config_path.open(encoding="utf-8") as fh:
         data = json.load(fh)
     cats = data.get("categories", {})
-    targets = []  # list of (category, url, expect)
+    targets = []  # list of (category, url, expect, weight)
     selected = {}
     for name, cfg in cats.items():
         if only and name not in only:
@@ -85,9 +85,10 @@ def load_targets(config_path: Path, only: list[str] | None):
         if not urls:
             continue
         expect = cfg.get("expect", "unknown")
-        selected[name] = len(urls)
+        weight = max(1, int(cfg.get("weight", 1)))
+        selected[name] = (len(urls), weight)
         for url in urls:
-            targets.append((name, url, expect))
+            targets.append((name, url, expect, weight))
     return targets, selected
 
 
@@ -179,10 +180,20 @@ async def run(args):
     print("=" * 70)
     print("FortiGate lab web traffic generator")
     print("=" * 70)
+    # Weighted pool: each target repeated 'weight' times so higher-weight
+    # (normal) categories are hit proportionally more often.
+    weighted_pool = []
+    for cat, url, expect, weight in targets:
+        weighted_pool.extend([(cat, url, expect)] * weight)
+
     if not args.dns_only:
-        for name, count in selected.items():
-            print(f"  {name:26} {count:3} url(s)")
-        print(f"\n  http targets/pass : {len(targets)}")
+        for name, (count, weight) in selected.items():
+            print(f"  {name:26} {count:3} url(s)  x{weight}")
+        if args.requests:
+            print(f"\n  http requests/pass : {args.requests} (weighted-random sample)")
+        else:
+            print(f"\n  http requests/pass : {len(weighted_pool)} "
+                  f"(weighted full pass; {len(targets)} unique urls)")
     if do_dns:
         n_dns = len(dns_gen.build_domain_list(dns_cfg, dga_count=args.dga_count))
         print(f"  dns queries/pass  : {n_dns} "
@@ -206,9 +217,13 @@ async def run(args):
         while True:
             passes += 1
             if not args.dns_only:
-                batch = list(targets)
-                if args.shuffle:
-                    random.shuffle(batch)
+                if args.requests:
+                    # Weighted-random sample (with replacement) for sustained load.
+                    batch = random.choices(weighted_pool, k=args.requests)
+                else:
+                    batch = list(weighted_pool)
+                    if args.shuffle:
+                        random.shuffle(batch)
                 tasks = [
                     asyncio.create_task(fetch(session, sem, cat, url, expect, stats, args))
                     for cat, url, expect in batch
@@ -270,11 +285,11 @@ def print_report(stats: Stats, elapsed: float, passes: int):
 def list_categories(config_path: Path):
     with config_path.open(encoding="utf-8") as fh:
         data = json.load(fh)
-    print(f"{'category':28} {'enabled':8} {'expect':7} urls")
-    print("-" * 60)
+    print(f"{'category':28} {'enabled':8} {'expect':7} {'weight':>6} urls")
+    print("-" * 66)
     for name, cfg in data.get("categories", {}).items():
         print(f"{name:28} {str(cfg.get('enabled', True)):8} "
-              f"{cfg.get('expect', '?'):7} {len(cfg.get('urls', []))}")
+              f"{cfg.get('expect', '?'):7} {cfg.get('weight', 1):>6} {len(cfg.get('urls', []))}")
 
 
 def parse_args():
@@ -306,7 +321,10 @@ def parse_args():
     p.add_argument("--no-redirects", action="store_true",
                    help="Do not follow HTTP redirects.")
     p.add_argument("--shuffle", action="store_true",
-                   help="Shuffle target order each pass.")
+                   help="Shuffle target order each pass (weighted full-pass mode).")
+    p.add_argument("--requests", type=int, default=None, metavar="N",
+                   help="Instead of a full pass, fire N weighted-random requests/pass "
+                        "(with replacement) - realistic, rate-controllable mix.")
     p.add_argument("--dns", action="store_true",
                    help="Also run a DNS/DGA query phase each pass (DNS filtering + Botnet C&C test).")
     p.add_argument("--dns-only", action="store_true",

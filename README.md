@@ -6,6 +6,12 @@ categorized target lists (malware/EICAR, phishing, gambling, hacking, proxy-avoi
 weapons, drugs, warez, streaming, and clean baseline) and reports what got through vs.
 what the FortiGate blocked.
 
+It also generates a broad spread of **normal, everyday traffic** — news, shopping,
+finance/banking, technology, education, health, travel, sports, government, food,
+automotive, jobs, streaming/social, and a clean baseline — so the lab sees realistic
+user browsing for app-control logging and category-allow verification, not just the
+"should be blocked" categories.
+
 Built to be developed anywhere but **run on a lab VM sitting behind the FortiGate**.
 
 > All targets are either harmless industry test files (EICAR / AMTSO / WICAR /
@@ -53,6 +59,35 @@ python web_gen.py --categories av_malware_eicar av_amtso --full-download -v
 | `--shuffle` | Randomize target order each pass. |
 | `--no-cache-bust` | Don't append a random query param to each URL. |
 | `-v` / `--verbose` | Print every request with its block/ok/err verdict. |
+
+## Weighting (realistic traffic mix)
+
+Each category has a `weight` in [config.json](config.json) — its relative hit
+frequency. Normal categories are weighted up (benign/streaming = 6, most everyday
+categories = 3–5) and should-be-blocked categories are weighted down (= 1), so a run
+looks like a real user population: mostly ordinary browsing with the occasional hit on
+gambling/hacking/malware. In practice normal traffic is ~85% of volume and the
+block-worthy categories are a ~1%-each long tail.
+
+Two ways weighting is applied:
+
+- **Weighted full pass (default):** every URL is fired each pass, repeated `weight`
+  times. Comprehensive — everything gets exercised, just in realistic proportion. Add
+  `--shuffle` to interleave categories instead of firing them in blocks.
+- **Weighted-random sample:** `--requests N` fires N weighted-random requests per pass
+  (with replacement). Best for sustained, rate-controlled load that still follows the
+  weights.
+
+```powershell
+# Realistic weighted mix, interleaved, HTTP + DNS, for 5 minutes
+python web_gen.py --loop --duration 300 --concurrency 200 --shuffle --dns
+
+# Sustained 400 weighted-random requests per pass
+python web_gen.py --loop --duration 600 --requests 400 --concurrency 200
+```
+
+Weights (minimum 1) show in `python web_gen.py --list`. To drop a category entirely,
+set `"enabled": false` or use `--categories` to restrict the run.
 
 ## DNS / DGA traffic (FortiGate DNS filtering + Botnet C&C detection)
 
