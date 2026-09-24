@@ -60,6 +60,85 @@ python web_gen.py --categories av_malware_eicar av_amtso --full-download -v
 | `--no-cache-bust` | Don't append a random query param to each URL. |
 | `-v` / `--verbose` | Print every request with its block/ok/err verdict. |
 
+## Application Control (BitTorrent / Proxy / Tor)
+
+[app_control.py](app_control.py) generates **real application-protocol traffic** so
+FortiGate **Application Control** can identify and block it. Unlike web/DNS filtering,
+App Control uses DPI on protocol behaviour — hitting a URL won't trigger it, so this
+puts the actual protocols on the wire:
+
+- **BitTorrent** — HTTP **tracker announce** (`info_hash`/`peer_id`/`port` + a
+  BitTorrent user-agent) and **DHT ping** (UDP bencode) to real DHT bootstrap nodes.
+- **Proxy** — HTTP **`CONNECT`** and **absolute-URI** requests (proxy semantics).
+- **Tor** — a **real Tor circuit via torpy** (pure-Python Tor client), which makes
+  genuine TLS connections to live Tor guard relays — exactly what App Control detects.
+
+```powershell
+python web_gen.py --apps            # add App Control to a normal run
+python web_gen.py --apps-only       # only App Control
+python web_gen.py --apps --no-tor   # skip the slow Tor circuit
+python app_control.py --no-tor      # standalone
+```
+
+Important notes:
+
+- **Client-side block detection is best-effort.** An App Control block is a
+  mid-session reset, which is hard to distinguish from an ordinary reset — so the
+  tool's `blocked?/passed` verdict is a hint. **The FortiGate App Control log/widget
+  is the authoritative proof** (same as File Filter).
+- **DHT `err` = no UDP reply**, not a failure — the packet was still sent across the
+  FortiGate (which is the point).
+- **Tor is real and slow** (builds a live circuit, ~10–40s) so it runs **once per
+  run**, not every pass. If the circuit doesn't complete, the guard-relay connections
+  were still made — check the FortiGate log. `torpy` is unmaintained and calls the
+  `ssl.wrap_socket` API removed in Python 3.12+, so [app_control.py](app_control.py)
+  ships a small SSLContext shim to keep it working on modern Python.
+- Other named P2P apps (Ares, FrostWire, DC++, …) each need their own client and
+  aren't synthesised — BitTorrent covers the P2P category.
+- Targets (trackers, DHT nodes, proxy/Tor destinations) are configurable in the
+  `app_control` section of [config.json](config.json).
+
+## IPS testing (signature validation)
+
+[ips.py](ips.py) fires an assortment of **well-known IPS signature patterns** so you
+can confirm FortiGate Intrusion Prevention is catching them: Shellshock
+(CVE-2014-6271), Log4Shell (CVE-2021-44228), Struts OGNL (CVE-2017-5638), SQLi, XSS,
+path traversal, command injection, scanner user-agents (nikto/sqlmap/nmap/masscan/
+ZmEu), and the classic `testmyids` GPL id-check.
+
+IPS matches the pattern **in transit**, so no vulnerable target is needed — the tool
+just carries each pattern (in a query string, header, or user-agent) to a neutral
+sink. A block shows up as a **connection reset** or a FortiGate IPS block page:
+
+```
+by trigger:              blocked  passed   err
+  shellshock                   1       0     0   <- IPS caught it
+  log4shell                    1       0     0
+  sqli-union                   0       1     0   <- IPS did NOT catch this
+```
+
+**Pick the target carefully** (`ips.target_url` in [config.json](config.json)):
+
+- Use a target with **no upstream WAF**, or its WAF resets the patterns and you can't
+  tell those from a FortiGate block. Default is `http://example.com/` (IANA test
+  domain, no WAF). **Best of all: a plain HTTP server inside your lab** that returns
+  200 for anything — then any block is unambiguously the FortiGate, and traffic stays
+  internal.
+- Use **`http://`** so IPS inspects the plaintext without SSL deep inspection.
+
+Look up the matched signature IDs afterward in the FortiGate IPS log or the
+[FortiGuard IPS Encyclopedia](https://www.fortiguard.com/encyclopedia/ips).
+
+```powershell
+python web_gen.py --ips              # add IPS phase to a normal run
+python web_gen.py --ips-only         # only the IPS phase
+python ips.py                        # standalone
+```
+
+> ⚠️ These are real attack-signature strings, but inert (JNDI points at loopback; the
+> payloads only *carry* the pattern for matching — no exploitation, no victim app).
+> Run only against your own lab FortiGate.
+
 ## File Filter testing (block-exec / monitor-docs policies)
 
 [file_filter.py](file_filter.py) exercises FortiGate **File Filter** by moving an

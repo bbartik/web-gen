@@ -1,3 +1,4 @@
 aiohttp>=3.9
 aiodns>=3.1
 pyzipper>=0.3   # AES-encrypted zip for File Filter password-protected test
+torpy>=1.1      # pure-Python Tor client for App Control Tor traffic

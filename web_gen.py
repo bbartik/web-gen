@@ -37,6 +37,8 @@ except ImportError:
 import dns_gen  # noqa: E402  (also sets the Windows selector loop policy aiodns needs)
 import threat_feeds  # noqa: E402
 import file_filter  # noqa: E402
+import ips as ips_mod  # noqa: E402
+import app_control  # noqa: E402
 
 
 USER_AGENTS = [
@@ -179,10 +181,20 @@ async def run(args):
         full_cfg = json.load(fh)
     dns_cfg = full_cfg.get("dns", {})
     ff_cfg = full_cfg.get("file_filter", {})
-    do_files = (args.files or args.files_only) and ff_cfg.get("enabled", True)
-    # DNS and HTTP are skipped when a more specific *-only mode is requested.
-    do_dns = (args.dns or args.dns_only) and not args.files_only
-    do_http = not (args.dns_only or args.files_only)
+    ips_cfg = full_cfg.get("ips", {})
+    ac_cfg = full_cfg.get("app_control", {})
+    # A *-only flag restricts the run to just that phase. A phase runs if its flag
+    # (or its -only flag) is set, it's enabled, and no OTHER *-only is in effect.
+    any_only = args.dns_only or args.files_only or args.ips_only or args.apps_only
+
+    def phase_on(flag, only_flag, enabled=True):
+        return (flag or only_flag) and enabled and (not any_only or only_flag)
+
+    do_http = not any_only
+    do_dns = phase_on(args.dns, args.dns_only)
+    do_files = phase_on(args.files, args.files_only, ff_cfg.get("enabled", True))
+    do_ips = phase_on(args.ips, args.ips_only, ips_cfg.get("enabled", True))
+    do_apps = phase_on(args.apps, args.apps_only, ac_cfg.get("enabled", True))
 
     # Source IPs to bind outgoing traffic to (CLI overrides config). Each becomes a
     # distinct client on the FortiGate. [None] = OS default source selection.
@@ -229,6 +241,12 @@ async def run(args):
                    list(file_filter.GENERATORS.keys()))))
         n_dn = len(ff_cfg.get("download_urls", []))
         print(f"  file filter  : on ({n_up} uploads + {n_dn} downloads/pass)")
+    if do_ips:
+        n_ips = len(ips_cfg.get("triggers") or ips_mod.TRIGGERS)
+        print(f"  ips          : on ({n_ips} signature triggers/pass)")
+    if do_apps:
+        tor_note = "with real Tor" if not args.no_tor else "no Tor"
+        print(f"  app control  : on (BitTorrent + proxy, {tor_note})")
     if do_threat:
         print(f"  threat feeds : on (~{tf.mix_rate*100:.1f}% of connections, "
               f"poll {int(tf.poll_interval)}s)")
@@ -244,6 +262,8 @@ async def run(args):
     stats = Stats()
     dns_stats = dns_gen.DnsStats()
     file_stats = file_filter.FileStats()
+    ips_stats = ips_mod.IpsStats()
+    app_stats = app_control.AppStats()
     sem = asyncio.Semaphore(args.concurrency)
     timeout = aiohttp.ClientTimeout(total=args.timeout)
 
@@ -306,6 +326,18 @@ async def run(args):
                     ff_cfg, sessions, sem, stats=file_stats, verbose=args.verbose,
                 )
 
+            if do_ips:
+                await ips_mod.run_ips_phase(
+                    ips_cfg, sessions, sem, stats=ips_stats, verbose=args.verbose,
+                )
+
+            if do_apps:
+                # Tor circuit is slow, so only build it once (first pass).
+                await app_control.run_app_phase(
+                    ac_cfg, sessions, sem, stats=app_stats, verbose=args.verbose,
+                    source_ips=source_ips, do_tor=(not args.no_tor and passes == 1),
+                )
+
             if args.delay:
                 await asyncio.sleep(args.delay)
 
@@ -329,6 +361,10 @@ async def run(args):
         dns_gen.print_dns_report(dns_stats)
     if do_files:
         file_filter.print_file_report(file_stats)
+    if do_ips:
+        ips_mod.print_ips_report(ips_stats)
+    if do_apps:
+        app_control.print_app_report(app_stats)
 
 
 def print_report(stats: Stats, elapsed: float, passes: int):
@@ -415,6 +451,16 @@ def parse_args():
                    help="Also run a File Filter phase each pass (upload generated file types + download real ones).")
     p.add_argument("--files-only", action="store_true",
                    help="Run only the File Filter phase; skip HTTP and DNS.")
+    p.add_argument("--ips", action="store_true",
+                   help="Also run an IPS phase each pass (fire well-known signature patterns).")
+    p.add_argument("--ips-only", action="store_true",
+                   help="Run only the IPS phase; skip HTTP, DNS, and files.")
+    p.add_argument("--apps", action="store_true",
+                   help="Also run an App Control phase (BitTorrent, proxy, real Tor traffic).")
+    p.add_argument("--apps-only", action="store_true",
+                   help="Run only the App Control phase.")
+    p.add_argument("--no-tor", action="store_true",
+                   help="With --apps/--apps-only, skip the (slow) real Tor circuit.")
     p.add_argument("--dga-count", type=int, default=None,
                    help="Override number of DGA domains generated per pass.")
     p.add_argument("--no-threat-feeds", action="store_true",

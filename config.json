@@ -11,6 +11,41 @@
     "10.21.1.41"
   ],
 
+  "_app_control_comment": "Generate real application-protocol traffic for FortiGate Application Control (DPI, not URLs): BitTorrent (tracker announce + DHT), Proxy (HTTP CONNECT + absolute-URI), and Tor (real circuit via torpy). Client-side block detection is best-effort; the FortiGate App Control log is authoritative. Run with --apps or --apps-only.",
+  "app_control": {
+    "enabled": true,
+    "bittorrent": {
+      "trackers": [
+        "http://example.com/announce",
+        "http://tracker.opentrackr.org:1337/announce"
+      ],
+      "dht_nodes": [
+        ["router.bittorrent.com", 6881],
+        ["dht.transmissionbt.com", 6881],
+        ["router.utorrent.com", 6881]
+      ]
+    },
+    "proxy": {
+      "host": "example.com",
+      "port": 80,
+      "connect_targets": ["www.google.com:443"],
+      "absolute_uris": ["http://www.google.com/"]
+    },
+    "tor": {
+      "enabled": true,
+      "target_host": "example.com",
+      "target_port": 80,
+      "timeout": 90
+    }
+  },
+
+  "_ips_comment": "Validate FortiGate IPS by carrying well-known signature patterns (Shellshock, Log4Shell, SQLi, XSS, traversal, scanner UAs, GPL id-check) to a neutral sink. IMPORTANT: use a target with NO upstream WAF so blocks are unambiguously the FortiGate - http://example.com (IANA test domain, no WAF) or best of all a plain web server inside your lab. Avoid Cloudflare-fronted echo services, which block these themselves. Use http:// so IPS can inspect without SSL deep inspection. Run with --ips or --ips-only.",
+  "ips": {
+    "enabled": true,
+    "target_url": "http://example.com/",
+    "target_post_url": "http://example.com/"
+  },
+
   "_file_filter_comment": "Exercise FortiGate File Filter by uploading locally-generated files (correct magic bytes, harmless content) to upload_url AND downloading real harmless files. Types align with a typical block-exec / block-image / monitor-docs policy. Run with --files or --files-only.",
   "file_filter": {
     "enabled": true,
