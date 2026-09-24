@@ -210,8 +210,24 @@ def build_domain_list(dns_cfg, dga_count=None, rng=None):
     return domains
 
 
+def _make_resolvers(timeout, servers, source_ips):
+    """One resolver per source IP (bound via pycares local_ip); [None] = default."""
+    ips = source_ips or [None]
+    resolvers = []
+    for ip in ips:
+        kwargs = {"timeout": timeout, "tries": 1}
+        if ip:
+            kwargs["local_ip"] = ip  # pycares binds queries to this source address
+        r = aiodns.DNSResolver(**kwargs)
+        if servers:
+            r.nameservers = servers
+        resolvers.append(r)
+    return resolvers
+
+
 async def run_dns_phase(dns_cfg, concurrency=200, timeout=5.0, dga_count=None,
-                        verbose=False, stats=None, rng=None, servers=None):
+                        verbose=False, stats=None, rng=None, servers=None,
+                        source_ips=None):
     """Resolve the whole domain list once. Returns DnsStats."""
     if aiodns is None:
         print("aiodns not installed - skipping DNS phase. pip install aiodns")
@@ -225,15 +241,14 @@ async def run_dns_phase(dns_cfg, concurrency=200, timeout=5.0, dga_count=None,
     record_types = dns_cfg.get("record_types", ["A"])
     block_ips = set(dns_cfg.get("block_ips", DEFAULT_BLOCK_IPS))
 
-    resolver = aiodns.DNSResolver(timeout=timeout, tries=1)
-    if servers:
-        resolver.nameservers = servers
+    resolvers = _make_resolvers(timeout, servers, source_ips)
     sem = asyncio.Semaphore(concurrency)
     tasks = [
         asyncio.create_task(
-            resolve_one(resolver, sem, src, dom, record_types, block_ips, stats, verbose)
+            resolve_one(resolvers[i % len(resolvers)], sem, src, dom,
+                        record_types, block_ips, stats, verbose)
         )
-        for src, dom in domains
+        for i, (src, dom) in enumerate(domains)
     ]
     await asyncio.gather(*tasks)
     return stats
@@ -261,11 +276,6 @@ def print_dns_report(stats: DnsStats):
 # Standalone CLI
 # --------------------------------------------------------------------------- #
 
-def load_dns_cfg(config_path):
-    with open(config_path, encoding="utf-8") as fh:
-        return json.load(fh).get("dns", {})
-
-
 def parse_args():
     p = argparse.ArgumentParser(description="Async DNS / DGA traffic generator for FortiGate labs.")
     p.add_argument("--config", default="config.json")
@@ -275,17 +285,20 @@ def parse_args():
                    help="Override the number of DGA domains generated.")
     p.add_argument("--iterations", type=int, default=1)
     p.add_argument("--servers", nargs="*", help="Override DNS server(s) instead of the OS default.")
+    p.add_argument("--source-ips", nargs="*", metavar="IP", default=None,
+                   help="Bind queries to these local source IPs (round-robin). "
+                        "Overrides 'source_ips' in config.json.")
     p.add_argument("--sample", action="store_true", help="Print a sample of generated DGA domains and exit.")
     p.add_argument("--verbose", "-v", action="store_true")
     return p.parse_args()
 
 
-async def _main_async(args, dns_cfg):
+async def _main_async(args, dns_cfg, source_ips):
     stats = DnsStats()
     for _ in range(args.iterations):
         await run_dns_phase(dns_cfg, concurrency=args.concurrency, timeout=args.timeout,
                             dga_count=args.dga_count, verbose=args.verbose, stats=stats,
-                            servers=args.servers)
+                            servers=args.servers, source_ips=source_ips)
     print_dns_report(stats)
 
 
@@ -294,7 +307,11 @@ def main():
     config_path = Path(args.config)
     if not config_path.is_absolute():
         config_path = Path(__file__).parent / config_path
-    dns_cfg = load_dns_cfg(config_path)
+    with config_path.open(encoding="utf-8") as fh:
+        full_cfg = json.load(fh)
+    dns_cfg = full_cfg.get("dns", {})
+    source_ips = args.source_ips if args.source_ips is not None else full_cfg.get("source_ips", [])
+    source_ips = [ip for ip in source_ips if ip] or [None]
 
     if args.sample:
         rng = random.Random()
@@ -304,7 +321,7 @@ def main():
 
     if aiodns is None:
         sys.exit("aiodns is required. Activate your venv and run: pip install -r requirements.txt")
-    asyncio.run(_main_async(args, dns_cfg))
+    asyncio.run(_main_async(args, dns_cfg, source_ips))
 
 
 if __name__ == "__main__":

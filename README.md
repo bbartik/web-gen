@@ -60,6 +60,29 @@ python web_gen.py --categories av_malware_eicar av_amtso --full-download -v
 | `--no-cache-bust` | Don't append a random query param to each URL. |
 | `-v` / `--verbose` | Print every request with its block/ok/err verdict. |
 
+## Source IPs (multiple clients from one machine)
+
+If your lab VM has several IPs bound to its NIC (e.g. `10.21.1.10, .12, .15, .20,
+.32, .41`), the generator can **round-robin outgoing traffic across them** so the
+FortiGate sees each IP as a separate client — separate policy matches, separate log
+sources, separate per-IP stats.
+
+Set them in the `source_ips` list in [config.json](config.json) (pre-filled with the
+lab IPs) or override at runtime:
+
+```powershell
+python web_gen.py --source-ips 10.21.1.10 10.21.1.12 10.21.1.15 --dns
+```
+
+Both HTTP (aiohttp `local_addr`) and DNS (pycares `local_ip`) are bound. The results
+report includes a **by source IP** breakdown. Each IP must already be assigned to a
+NIC on the machine — binding to an unassigned IP just yields connection errors (shown
+in the report), not a crash. An empty `source_ips` list uses the OS default source.
+
+> To add the IPs in Windows: *Network adapter → IPv4 properties → Advanced → IP
+> addresses → Add* (the dialog in your screenshot), or
+> `netsh interface ipv4 add address "Ethernet0" 10.21.1.12 255.255.255.0`.
+
 ## Weighting (realistic traffic mix)
 
 Each category has a `weight` in [config.json](config.json) — its relative hit

@@ -1,5 +1,16 @@
 {
   "_comment": "FortiGate lab web-filter / AV test target list. 'expect' (block|allow|mixed) is a reporting hint. 'weight' is relative hit frequency (higher = hit more often; normal traffic is weighted up). Toggle a category with \"enabled\": false. Edit freely for your lab.",
+
+  "_source_ips_comment": "Local source IPs to bind outgoing traffic to (round-robin), so each appears as a separate client on the FortiGate. Must already be assigned to a NIC on this machine. Empty list = OS default. Override at runtime with --source-ips.",
+  "source_ips": [
+    "10.21.1.10",
+    "10.21.1.12",
+    "10.21.1.15",
+    "10.21.1.20",
+    "10.21.1.32",
+    "10.21.1.41"
+  ],
+
   "categories": {
     "av_malware_eicar": {
       "enabled": true,

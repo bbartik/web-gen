@@ -68,6 +68,7 @@ class Stats:
     bytes_down: int = 0
     status_counts: dict = field(default_factory=lambda: defaultdict(int))
     per_category: dict = field(default_factory=lambda: defaultdict(lambda: defaultdict(int)))
+    per_source_ip: dict = field(default_factory=lambda: defaultdict(int))
 
 
 def load_targets(config_path: Path, only: list[str] | None):
@@ -110,11 +111,13 @@ def classify(status: int, body_snippet: str) -> str:
     return "error"
 
 
-async def fetch(session, sem, category, url, expect, stats, args):
+async def fetch(session, sem, category, url, expect, stats, args, src_ip=None):
     request_url = bust_cache(url) if args.cache_bust else url
     headers = {"User-Agent": random.choice(USER_AGENTS)}
     async with sem:
         stats.total += 1
+        if src_ip:
+            stats.per_source_ip[src_ip] += 1
         try:
             async with session.get(
                 request_url,
@@ -171,6 +174,11 @@ async def run(args):
     dns_cfg = full_cfg.get("dns", {})
     do_dns = args.dns or args.dns_only
 
+    # Source IPs to bind outgoing traffic to (CLI overrides config). Each becomes a
+    # distinct client on the FortiGate. [None] = OS default source selection.
+    source_ips = args.source_ips if args.source_ips is not None else full_cfg.get("source_ips", [])
+    source_ips = [ip for ip in source_ips if ip] or [None]
+
     targets, selected = ([], {})
     if not args.dns_only:
         targets, selected = load_targets(config_path, args.categories)
@@ -199,6 +207,8 @@ async def run(args):
         print(f"  dns queries/pass  : {n_dns} "
               f"(dga + suspicious + benign)")
     print(f"  concurrency  : {args.concurrency}")
+    if source_ips != [None]:
+        print(f"  source ips   : {', '.join(source_ips)}")
     mode = f"loop for {args.duration}s" if args.loop else f"{args.iterations} iteration(s)"
     print(f"  mode         : {mode}")
     if not args.dns_only:
@@ -209,11 +219,20 @@ async def run(args):
     dns_stats = dns_gen.DnsStats()
     sem = asyncio.Semaphore(args.concurrency)
     timeout = aiohttp.ClientTimeout(total=args.timeout)
-    connector = aiohttp.TCPConnector(limit=args.concurrency, ssl=False, force_close=True)
+
+    # One ClientSession per source IP - aiohttp binds a connector to a single
+    # local_addr, so we pool them and round-robin requests across the pool.
+    sessions = []  # list of (src_ip, session)
+    for ip in source_ips:
+        conn = aiohttp.TCPConnector(
+            limit=args.concurrency, ssl=False, force_close=True,
+            local_addr=(ip, 0) if ip else None,
+        )
+        sessions.append((ip, aiohttp.ClientSession(timeout=timeout, connector=conn)))
 
     start = time.monotonic()
     passes = 0
-    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+    try:
         while True:
             passes += 1
             if not args.dns_only:
@@ -224,16 +243,18 @@ async def run(args):
                     batch = list(weighted_pool)
                     if args.shuffle:
                         random.shuffle(batch)
-                tasks = [
-                    asyncio.create_task(fetch(session, sem, cat, url, expect, stats, args))
-                    for cat, url, expect in batch
-                ]
+                tasks = []
+                for i, (cat, url, expect) in enumerate(batch):
+                    src_ip, session = sessions[i % len(sessions)]  # round-robin across IPs
+                    tasks.append(asyncio.create_task(
+                        fetch(session, sem, cat, url, expect, stats, args, src_ip)))
                 await asyncio.gather(*tasks)
 
             if do_dns:
                 await dns_gen.run_dns_phase(
                     dns_cfg, concurrency=args.concurrency, timeout=args.timeout,
                     dga_count=args.dga_count, verbose=args.verbose, stats=dns_stats,
+                    source_ips=source_ips,
                 )
 
             if args.delay:
@@ -246,6 +267,9 @@ async def run(args):
             else:
                 if passes >= args.iterations:
                     break
+    finally:
+        for _, session in sessions:
+            await session.close()
 
     elapsed = time.monotonic() - start
     if not args.dns_only:
@@ -279,6 +303,11 @@ def print_report(stats: Stats, elapsed: float, passes: int):
     print("\n  by HTTP status:")
     for status in sorted(stats.status_counts):
         print(f"    {status} : {stats.status_counts[status]}")
+
+    if stats.per_source_ip:
+        print("\n  by source IP:")
+        for ip in sorted(stats.per_source_ip):
+            print(f"    {ip:16} {stats.per_source_ip[ip]}")
     print("=" * 70)
 
 
@@ -331,6 +360,11 @@ def parse_args():
                    help="Run only the DNS/DGA phase; skip HTTP entirely.")
     p.add_argument("--dga-count", type=int, default=None,
                    help="Override number of DGA domains generated per pass.")
+    p.add_argument("--source-ips", nargs="*", metavar="IP", default=None,
+                   help="Bind outgoing traffic to these local source IPs (round-robin), "
+                        "so each shows up as a separate client on the FortiGate. "
+                        "Overrides 'source_ips' in config.json. Must already be assigned "
+                        "to a NIC on this machine.")
     p.add_argument("--verbose", "-v", action="store_true",
                    help="Print every request result.")
     p.add_argument("--list", action="store_true",
