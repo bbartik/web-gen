@@ -39,6 +39,7 @@ import threat_feeds  # noqa: E402
 import file_filter  # noqa: E402
 import ips as ips_mod  # noqa: E402
 import app_control  # noqa: E402
+import geoip  # noqa: E402
 
 
 USER_AGENTS = [
@@ -183,9 +184,11 @@ async def run(args):
     ff_cfg = full_cfg.get("file_filter", {})
     ips_cfg = full_cfg.get("ips", {})
     ac_cfg = full_cfg.get("app_control", {})
+    geo_cfg = full_cfg.get("geoip", {})
     # A *-only flag restricts the run to just that phase. A phase runs if its flag
     # (or its -only flag) is set, it's enabled, and no OTHER *-only is in effect.
-    any_only = args.dns_only or args.files_only or args.ips_only or args.apps_only
+    any_only = (args.dns_only or args.files_only or args.ips_only or args.apps_only
+                or args.geo_only)
 
     def phase_on(flag, only_flag, enabled=True):
         return (flag or only_flag) and enabled and (not any_only or only_flag)
@@ -195,6 +198,8 @@ async def run(args):
     do_files = phase_on(args.files, args.files_only, ff_cfg.get("enabled", True))
     do_ips = phase_on(args.ips, args.ips_only, ips_cfg.get("enabled", True))
     do_apps = phase_on(args.apps, args.apps_only, ac_cfg.get("enabled", True))
+    do_geo = phase_on(args.geo, args.geo_only, geo_cfg.get("enabled", True))
+    geo_feeds = geoip.GeoFeeds(geo_cfg) if do_geo else None
 
     # Source IPs to bind outgoing traffic to (CLI overrides config). Each becomes a
     # distinct client on the FortiGate. [None] = OS default source selection.
@@ -247,6 +252,9 @@ async def run(args):
     if do_apps:
         tor_note = "with real Tor" if not args.no_tor else "no Tor"
         print(f"  app control  : on (BitTorrent + proxy, {tor_note})")
+    if do_geo:
+        print(f"  geoip        : on ({len(geo_feeds.countries)} countries, "
+              f"{geo_feeds.ips_per_country} ips each/pass)")
     if do_threat:
         print(f"  threat feeds : on (~{tf.mix_rate*100:.1f}% of connections, "
               f"poll {int(tf.poll_interval)}s)")
@@ -264,6 +272,7 @@ async def run(args):
     file_stats = file_filter.FileStats()
     ips_stats = ips_mod.IpsStats()
     app_stats = app_control.AppStats()
+    geo_stats = geoip.GeoStats()
     sem = asyncio.Semaphore(args.concurrency)
     timeout = aiohttp.ClientTimeout(total=args.timeout)
 
@@ -277,11 +286,12 @@ async def run(args):
         )
         sessions.append((ip, aiohttp.ClientSession(timeout=timeout, connector=conn)))
 
-    # Separate session (default source) for fetching the threat feeds from GitHub.
+    # Separate session (default source) for fetching threat feeds / GeoIP CIDR lists.
     feed_session = None
-    if do_threat:
+    if do_threat or do_geo:
+        feed_timeout = tf.timeout if tf else 30
         feed_session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=tf.timeout),
+            timeout=aiohttp.ClientTimeout(total=feed_timeout),
             connector=aiohttp.TCPConnector(ssl=False, force_close=True),
         )
 
@@ -338,6 +348,12 @@ async def run(args):
                     source_ips=source_ips, do_tor=(not args.no_tor and passes == 1),
                 )
 
+            if do_geo:
+                await geo_feeds.maybe_refresh(feed_session)
+                await geoip.run_geo_phase(
+                    geo_feeds, sessions, sem, stats=geo_stats, verbose=args.verbose,
+                )
+
             if args.delay:
                 await asyncio.sleep(args.delay)
 
@@ -365,6 +381,8 @@ async def run(args):
         ips_mod.print_ips_report(ips_stats)
     if do_apps:
         app_control.print_app_report(app_stats)
+    if do_geo:
+        geoip.print_geo_report(geo_stats)
 
 
 def print_report(stats: Stats, elapsed: float, passes: int):
@@ -461,6 +479,10 @@ def parse_args():
                    help="Run only the App Control phase.")
     p.add_argument("--no-tor", action="store_true",
                    help="With --apps/--apps-only, skip the (slow) real Tor circuit.")
+    p.add_argument("--geo", action="store_true",
+                   help="Also run a GeoIP phase (traffic to IPs in sanctioned countries).")
+    p.add_argument("--geo-only", action="store_true",
+                   help="Run only the GeoIP phase.")
     p.add_argument("--dga-count", type=int, default=None,
                    help="Override number of DGA domains generated per pass.")
     p.add_argument("--no-threat-feeds", action="store_true",

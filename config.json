@@ -11,6 +11,41 @@
     "10.21.1.41"
   ],
 
+  "_geoip_comment": "Generate traffic to IPs in embargoed/sanctioned countries so FortiGate GeoIP (destination-country) policies match. Per-country IPv4 CIDRs pulled from ipdeny.com aggregated zones. ips_per_country = random IPs hit per country per pass. Add {code,name,domain} entries to 'domains' for known in-country sites (cleaner signal). Run with --geo or --geo-only.",
+  "geoip": {
+    "enabled": true,
+    "cidr_url_template": "https://www.ipdeny.com/ipblocks/data/aggregated/{cc}-aggregated.zone",
+    "ips_per_country": 2,
+    "poll_interval_sec": 3600,
+    "countries": [
+      {"code": "cu", "name": "Cuba"},
+      {"code": "ir", "name": "Iran"},
+      {"code": "sy", "name": "Syria"},
+      {"code": "kp", "name": "North Korea"},
+      {"code": "ru", "name": "Russia"},
+      {"code": "by", "name": "Belarus"},
+      {"code": "ve", "name": "Venezuela"},
+      {"code": "cn", "name": "China"},
+      {"code": "mm", "name": "Myanmar"},
+      {"code": "af", "name": "Afghanistan"},
+      {"code": "iq", "name": "Iraq"},
+      {"code": "ly", "name": "Libya"},
+      {"code": "sd", "name": "Sudan"},
+      {"code": "ss", "name": "South Sudan"},
+      {"code": "so", "name": "Somalia"},
+      {"code": "ye", "name": "Yemen"},
+      {"code": "cd", "name": "DR Congo"},
+      {"code": "cf", "name": "Central African Rep"},
+      {"code": "er", "name": "Eritrea"},
+      {"code": "lb", "name": "Lebanon"},
+      {"code": "ml", "name": "Mali"},
+      {"code": "ni", "name": "Nicaragua"},
+      {"code": "zw", "name": "Zimbabwe"},
+      {"code": "et", "name": "Ethiopia"}
+    ],
+    "domains": []
+  },
+
   "_app_control_comment": "Generate real application-protocol traffic for FortiGate Application Control (DPI, not URLs): BitTorrent (tracker announce + DHT), Proxy (HTTP CONNECT + absolute-URI), and Tor (real circuit via torpy). Client-side block detection is best-effort; the FortiGate App Control log is authoritative. Run with --apps or --apps-only.",
   "app_control": {
     "enabled": true,

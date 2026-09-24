@@ -46,19 +46,87 @@ python web_gen.py --categories gambling hacking av_malware_eicar -v
 python web_gen.py --categories av_malware_eicar av_amtso --full-download -v
 ```
 
-### Key flags
+### What a bare run does
 
-| Flag | Meaning |
-|------|---------|
-| `--concurrency N` | Max simultaneous in-flight requests (default 100). Raise for more load. |
-| `--loop --duration S` | Keep looping for S seconds instead of a fixed pass count. |
-| `--iterations N` | Number of passes over the list (default 1). |
-| `--categories ...` | Restrict to named categories (overrides the `enabled` flags). |
-| `--full-download` | Pull entire response bodies (needed to make AV actually scan EICAR). |
-| `--delay S` | Sleep between passes. |
-| `--shuffle` | Randomize target order each pass. |
-| `--no-cache-bust` | Don't append a random query param to each URL. |
-| `-v` / `--verbose` | Print every request with its block/ok/err verdict. |
+`python web_gen.py` with no flags: **one weighted pass** over every enabled web
+category (~230 URLs, ~800 weighted requests), **100 concurrent**, 15s timeout,
+cache-busting on, with **threat-feed targets mixed in (~2.5%)** and traffic
+**round-robined across the source IPs in config**. The DNS, File Filter, IPS, App
+Control and GeoIP phases are **off** until you add their flag.
+
+### Flags and defaults
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--config PATH` | `config.json` | Config file (resolved next to the script). |
+| `--categories ...` | *(all enabled)* | Restrict to named web categories (overrides `enabled`). |
+| `--concurrency N` | `100` | Max simultaneous in-flight requests. |
+| `--iterations N` | `1` | Passes over the list (ignored with `--loop`). |
+| `--loop` | off | Loop until `--duration` elapses instead of a pass count. |
+| `--duration S` | `60` | Seconds to run when `--loop` is set. |
+| `--delay S` | `0.0` | Sleep between passes. |
+| `--timeout S` | `15.0` | Per-request total timeout. |
+| `--requests N` | *(off → full pass)* | Fire N weighted-random requests/pass instead of a full weighted pass. |
+| `--shuffle` | off | Randomize/interleave target order each pass. |
+| `--full-download` | off | Pull full response bodies (needed for AV to scan EICAR). |
+| `--no-redirects` | off (follows) | Don't follow HTTP redirects. |
+| `--cache-bust` / `--no-cache-bust` | **on** | Append a random `?cb=` to each URL (threat-feed URLs excluded). |
+| `--dns` / `--dns-only` | off | Add / isolate the DNS + DGA phase. |
+| `--dga-count N` | *(config: 300)* | Override number of DGA domains per pass. |
+| `--files` / `--files-only` | off | Add / isolate the File Filter phase. |
+| `--ips` / `--ips-only` | off | Add / isolate the IPS signature phase. |
+| `--apps` / `--apps-only` | off | Add / isolate the App Control phase (BitTorrent/proxy/Tor). |
+| `--no-tor` | off (Tor on) | With `--apps`, skip the slow real Tor circuit. |
+| `--geo` / `--geo-only` | off | Add / isolate the GeoIP (sanctioned-country) phase. |
+| `--no-threat-feeds` | off (feeds on) | Disable the threat-feed mix-in. |
+| `--threat-rate R` | *(config: 0.025)* | Fraction of connections that are threat-feed targets. |
+| `--source-ips ...` | *(config: 6 lab IPs)* | Bind outgoing traffic to these local IPs; `""` = OS default. |
+| `-v` / `--verbose` | off | Print every request/query with its verdict. |
+| `--list` | — | List web categories (with enabled/expect/weight) and exit. |
+
+### Config-side defaults (in [config.json](config.json))
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `source_ips` | 6 lab IPs (`10.21.1.10/.12/.15/.20/.32/.41`) | `[]` = OS default source. |
+| all phases `enabled` | `true` | Phase still needs its CLI flag to run (except HTTP + threat feeds). |
+| `threat_feeds.mix_rate` | `0.025` (~2.5%) | Poll interval 600s. |
+| `dns.dga.count` | `300` | Plus suspicious + benign domains. |
+| `dns.record_types` | `["A","AAAA"]` | FortiGuard block IPs `208.91.112.55/.52/.53`. |
+| `file_filter.upload_url` | `postman-echo.com/post` | Downloads: thinkbroadband zip + PuTTY exe. |
+| `ips.target_url` | `http://example.com/` | Use an internal no-WAF host for cleanest results. |
+| `app_control.tor.timeout` | `90`s | Tor runs once per run (slow). |
+| `geoip.ips_per_country` | `2` | 24 default countries; CIDRs from ipdeny.com, polled hourly. |
+
+## GeoIP testing (sanctioned / embargoed countries)
+
+[geoip.py](geoip.py) generates traffic to IPs allocated to **embargoed / sanctioned
+countries** so FortiGate **GeoIP (destination-country) firewall policies** match and
+block it. It pulls per-country IPv4 CIDR lists (default from **ipdeny.com** aggregated
+zones), picks random hosts in each country, and connects.
+
+Default country set mirrors the common EAR/ITAR/OFAC lists (Cuba, Iran, Syria, North
+Korea, Russia, Belarus, Venezuela, China, Myanmar, Afghanistan, Iraq, Libya, Sudan,
+Somalia, Yemen, and more). Edit the `countries` list in the `geoip` section of
+[config.json](config.json); `ips_per_country` controls how many random IPs per country
+each pass. Add known in-country sites to `domains` for a cleaner signal.
+
+```powershell
+python web_gen.py --geo            # add GeoIP phase to a normal run
+python web_gen.py --geo-only       # only GeoIP
+python geoip.py                    # standalone
+```
+
+Notes:
+
+- **Client-side detection is best-effort.** A GeoIP block is usually a silent drop or
+  reset, and a random in-country IP may not host anything anyway — so `reached` means
+  "got a response (not blocked)", `blk/rst` is a likely block, and `noresp` is
+  ambiguous. **The FortiGate policy log (destination country + block) is the
+  authoritative proof.**
+- CIDR lists are cached and re-polled every `poll_interval_sec` (default 1h).
+- Other IP-by-country sources you can point `cidr_url_template` at: MaxMind GeoLite2,
+  or the `herrbischoff/country-ip-blocks` GitHub repo.
 
 ## Application Control (BitTorrent / Proxy / Tor)
 
