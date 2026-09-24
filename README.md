@@ -60,6 +60,36 @@ python web_gen.py --categories av_malware_eicar av_amtso --full-download -v
 | `--no-cache-bust` | Don't append a random query param to each URL. |
 | `-v` / `--verbose` | Print every request with its block/ok/err verdict. |
 
+## External threat feeds (prove the FortiGate feeds are matching)
+
+The generator can pull the **same external threat-feed lists you point the FortiGate
+at** (URLhaus / OpenPhish / Spamhaus / Feodo) and mix a small random assortment into
+the traffic, so the FortiGate's external-connector matches show up in logs — an easy
+way to demonstrate the feeds are live. Configured in the `threat_feeds` section of
+[config.json](config.json):
+
+- `urls` feed  → fired as `http://<entry>` (host[:port]/path)
+- `ips` feed   → fired as `http://<host>/` (a host is picked from any CIDR)
+- `domains` feed → fired as `https://<domain>/` **and** queried in the DNS phase
+
+The feeds are re-polled every `poll_interval_sec` (default 600s) so list updates get
+picked up. Injection defaults to `mix_rate` **0.025 (~2.5% of connections)**, capped
+at `max_per_pass`. Feed hits are reported under the **`threat_feed`** category (and
+DNS source).
+
+```powershell
+python web_gen.py --loop --duration 300 --dns            # feeds on by default
+python web_gen.py --threat-rate 0.03                     # bump to 3%
+python web_gen.py --no-threat-feeds                      # turn the mixing off
+```
+
+> ⚠️ **These are live malicious indicators.** Only run this behind a FortiGate that is
+> actually enforcing the feeds — the point is that the connection gets blocked. As a
+> safeguard the tool **never downloads the body** of a threat-feed target (ignores
+> `--full-download` for them) and never saves anything; it only opens the connection
+> so the FortiGate can match and block it. It also skips cache-busting on these so
+> URL-feed matching stays exact.
+
 ## Source IPs (multiple clients from one machine)
 
 If your lab VM has several IPs bound to its NIC (e.g. `10.21.1.10, .12, .15, .20,

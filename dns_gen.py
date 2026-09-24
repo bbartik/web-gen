@@ -227,7 +227,7 @@ def _make_resolvers(timeout, servers, source_ips):
 
 async def run_dns_phase(dns_cfg, concurrency=200, timeout=5.0, dga_count=None,
                         verbose=False, stats=None, rng=None, servers=None,
-                        source_ips=None):
+                        source_ips=None, extra_domains=None):
     """Resolve the whole domain list once. Returns DnsStats."""
     if aiodns is None:
         print("aiodns not installed - skipping DNS phase. pip install aiodns")
@@ -235,6 +235,8 @@ async def run_dns_phase(dns_cfg, concurrency=200, timeout=5.0, dga_count=None,
 
     stats = stats or DnsStats()
     domains = build_domain_list(dns_cfg, dga_count=dga_count, rng=rng)
+    if extra_domains:
+        domains = domains + list(extra_domains)  # e.g. threat-feed domains
     if not domains:
         return stats
 

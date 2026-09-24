@@ -35,6 +35,7 @@ except ImportError:
     sys.exit("aiohttp is required. Activate your venv and run: pip install -r requirements.txt")
 
 import dns_gen  # noqa: E402  (also sets the Windows selector loop policy aiodns needs)
+import threat_feeds  # noqa: E402
 
 
 USER_AGENTS = [
@@ -112,7 +113,11 @@ def classify(status: int, body_snippet: str) -> str:
 
 
 async def fetch(session, sem, category, url, expect, stats, args, src_ip=None):
-    request_url = bust_cache(url) if args.cache_bust else url
+    # Threat-feed targets are real malicious indicators: keep the URL exact (no
+    # cache-bust so URL-feed matching stays exact) and never download the body.
+    is_threat = category == "threat_feed"
+    request_url = url if is_threat else (bust_cache(url) if args.cache_bust else url)
+    full_dl = args.full_download and not is_threat
     headers = {"User-Agent": random.choice(USER_AGENTS)}
     async with sem:
         stats.total += 1
@@ -127,7 +132,7 @@ async def fetch(session, sem, category, url, expect, stats, args, src_ip=None):
             ) as resp:
                 # Read a small slice - enough to sniff a block page without huge downloads,
                 # unless --full-download is set (useful to actually pull the EICAR file).
-                if args.full_download:
+                if full_dl:
                     chunk = await resp.read()
                 else:
                     chunk = await resp.content.read(4096)
@@ -179,6 +184,13 @@ async def run(args):
     source_ips = args.source_ips if args.source_ips is not None else full_cfg.get("source_ips", [])
     source_ips = [ip for ip in source_ips if ip] or [None]
 
+    # Threat-feed mixing (CLI overrides config).
+    tf_cfg = dict(full_cfg.get("threat_feeds", {}))
+    if args.threat_rate is not None:
+        tf_cfg["mix_rate"] = args.threat_rate
+    do_threat = tf_cfg.get("enabled", False) and not args.no_threat_feeds
+    tf = threat_feeds.ThreatFeeds(tf_cfg) if do_threat else None
+
     targets, selected = ([], {})
     if not args.dns_only:
         targets, selected = load_targets(config_path, args.categories)
@@ -206,6 +218,9 @@ async def run(args):
         n_dns = len(dns_gen.build_domain_list(dns_cfg, dga_count=args.dga_count))
         print(f"  dns queries/pass  : {n_dns} "
               f"(dga + suspicious + benign)")
+    if do_threat:
+        print(f"  threat feeds : on (~{tf.mix_rate*100:.1f}% of connections, "
+              f"poll {int(tf.poll_interval)}s)")
     print(f"  concurrency  : {args.concurrency}")
     if source_ips != [None]:
         print(f"  source ips   : {', '.join(source_ips)}")
@@ -230,17 +245,33 @@ async def run(args):
         )
         sessions.append((ip, aiohttp.ClientSession(timeout=timeout, connector=conn)))
 
+    # Separate session (default source) for fetching the threat feeds from GitHub.
+    feed_session = None
+    if do_threat:
+        feed_session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=tf.timeout),
+            connector=aiohttp.TCPConnector(ssl=False, force_close=True),
+        )
+
     start = time.monotonic()
     passes = 0
     try:
         while True:
             passes += 1
+            if do_threat:
+                await tf.maybe_refresh(feed_session)
+
             if not args.dns_only:
                 if args.requests:
                     # Weighted-random sample (with replacement) for sustained load.
                     batch = random.choices(weighted_pool, k=args.requests)
                 else:
                     batch = list(weighted_pool)
+                    if args.shuffle:
+                        random.shuffle(batch)
+                # Mix in a small assortment of threat-feed targets.
+                if do_threat:
+                    batch = batch + tf.sample_http(tf.inject_count(len(batch)))
                     if args.shuffle:
                         random.shuffle(batch)
                 tasks = []
@@ -251,10 +282,11 @@ async def run(args):
                 await asyncio.gather(*tasks)
 
             if do_dns:
+                extra = tf.sample_dns(tf.inject_count(300)) if do_threat else None
                 await dns_gen.run_dns_phase(
                     dns_cfg, concurrency=args.concurrency, timeout=args.timeout,
                     dga_count=args.dga_count, verbose=args.verbose, stats=dns_stats,
-                    source_ips=source_ips,
+                    source_ips=source_ips, extra_domains=extra,
                 )
 
             if args.delay:
@@ -270,6 +302,8 @@ async def run(args):
     finally:
         for _, session in sessions:
             await session.close()
+        if feed_session is not None:
+            await feed_session.close()
 
     elapsed = time.monotonic() - start
     if not args.dns_only:
@@ -360,6 +394,11 @@ def parse_args():
                    help="Run only the DNS/DGA phase; skip HTTP entirely.")
     p.add_argument("--dga-count", type=int, default=None,
                    help="Override number of DGA domains generated per pass.")
+    p.add_argument("--no-threat-feeds", action="store_true",
+                   help="Disable mixing in external threat-feed targets (URLhaus/OpenPhish/etc).")
+    p.add_argument("--threat-rate", type=float, default=None, metavar="R",
+                   help="Fraction of connections that are threat-feed targets (e.g. 0.03). "
+                        "Overrides 'mix_rate' in config.json.")
     p.add_argument("--source-ips", nargs="*", metavar="IP", default=None,
                    help="Bind outgoing traffic to these local source IPs (round-robin), "
                         "so each shows up as a separate client on the FortiGate. "

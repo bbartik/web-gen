@@ -11,6 +11,20 @@
     "10.21.1.41"
   ],
 
+  "_threat_feeds_comment": "Pull the same external threat-feed lists the FortiGate uses and mix a small random assortment into traffic to prove the feeds are matching. Real malicious indicators - feed targets are never fully downloaded or saved. mix_rate 0.025 = ~2.5% of connections. Set enabled=false to skip.",
+  "threat_feeds": {
+    "enabled": true,
+    "mix_rate": 0.025,
+    "poll_interval_sec": 600,
+    "max_per_pass": 40,
+    "fetch_timeout_sec": 20,
+    "feeds": {
+      "urls": "https://raw.githubusercontent.com/bbartik/threat-feed-examples/refs/heads/main/bad-urls.txt",
+      "ips": "https://raw.githubusercontent.com/bbartik/threat-feed-examples/refs/heads/main/bad-ips.txt",
+      "domains": "https://raw.githubusercontent.com/bbartik/threat-feed-examples/refs/heads/main/bad-domains.txt"
+    }
+  },
+
   "categories": {
     "av_malware_eicar": {
       "enabled": true,
