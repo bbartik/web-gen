@@ -36,6 +36,7 @@ except ImportError:
 
 import dns_gen  # noqa: E402  (also sets the Windows selector loop policy aiodns needs)
 import threat_feeds  # noqa: E402
+import file_filter  # noqa: E402
 
 
 USER_AGENTS = [
@@ -177,7 +178,11 @@ async def run(args):
     with config_path.open(encoding="utf-8") as fh:
         full_cfg = json.load(fh)
     dns_cfg = full_cfg.get("dns", {})
-    do_dns = args.dns or args.dns_only
+    ff_cfg = full_cfg.get("file_filter", {})
+    do_files = (args.files or args.files_only) and ff_cfg.get("enabled", True)
+    # DNS and HTTP are skipped when a more specific *-only mode is requested.
+    do_dns = (args.dns or args.dns_only) and not args.files_only
+    do_http = not (args.dns_only or args.files_only)
 
     # Source IPs to bind outgoing traffic to (CLI overrides config). Each becomes a
     # distinct client on the FortiGate. [None] = OS default source selection.
@@ -188,11 +193,12 @@ async def run(args):
     tf_cfg = dict(full_cfg.get("threat_feeds", {}))
     if args.threat_rate is not None:
         tf_cfg["mix_rate"] = args.threat_rate
-    do_threat = tf_cfg.get("enabled", False) and not args.no_threat_feeds
+    do_threat = (tf_cfg.get("enabled", False) and not args.no_threat_feeds
+                 and (do_http or do_dns))  # only the HTTP/DNS phases consume feeds
     tf = threat_feeds.ThreatFeeds(tf_cfg) if do_threat else None
 
     targets, selected = ([], {})
-    if not args.dns_only:
+    if do_http:
         targets, selected = load_targets(config_path, args.categories)
         if not targets:
             sys.exit("No HTTP targets selected. Check --categories or enable some in config.json.")
@@ -206,7 +212,7 @@ async def run(args):
     for cat, url, expect, weight in targets:
         weighted_pool.extend([(cat, url, expect)] * weight)
 
-    if not args.dns_only:
+    if do_http:
         for name, (count, weight) in selected.items():
             print(f"  {name:26} {count:3} url(s)  x{weight}")
         if args.requests:
@@ -218,6 +224,11 @@ async def run(args):
         n_dns = len(dns_gen.build_domain_list(dns_cfg, dga_count=args.dga_count))
         print(f"  dns queries/pass  : {n_dns} "
               f"(dga + suspicious + benign)")
+    if do_files:
+        n_up = len(file_filter.generate_files(ff_cfg.get("generate_types",
+                   list(file_filter.GENERATORS.keys()))))
+        n_dn = len(ff_cfg.get("download_urls", []))
+        print(f"  file filter  : on ({n_up} uploads + {n_dn} downloads/pass)")
     if do_threat:
         print(f"  threat feeds : on (~{tf.mix_rate*100:.1f}% of connections, "
               f"poll {int(tf.poll_interval)}s)")
@@ -226,12 +237,13 @@ async def run(args):
         print(f"  source ips   : {', '.join(source_ips)}")
     mode = f"loop for {args.duration}s" if args.loop else f"{args.iterations} iteration(s)"
     print(f"  mode         : {mode}")
-    if not args.dns_only:
+    if do_http:
         print(f"  cache-bust   : {args.cache_bust}   full-download: {args.full_download}")
     print("=" * 70)
 
     stats = Stats()
     dns_stats = dns_gen.DnsStats()
+    file_stats = file_filter.FileStats()
     sem = asyncio.Semaphore(args.concurrency)
     timeout = aiohttp.ClientTimeout(total=args.timeout)
 
@@ -261,7 +273,7 @@ async def run(args):
             if do_threat:
                 await tf.maybe_refresh(feed_session)
 
-            if not args.dns_only:
+            if do_http:
                 if args.requests:
                     # Weighted-random sample (with replacement) for sustained load.
                     batch = random.choices(weighted_pool, k=args.requests)
@@ -289,6 +301,11 @@ async def run(args):
                     source_ips=source_ips, extra_domains=extra,
                 )
 
+            if do_files:
+                await file_filter.run_file_phase(
+                    ff_cfg, sessions, sem, stats=file_stats, verbose=args.verbose,
+                )
+
             if args.delay:
                 await asyncio.sleep(args.delay)
 
@@ -306,10 +323,12 @@ async def run(args):
             await feed_session.close()
 
     elapsed = time.monotonic() - start
-    if not args.dns_only:
+    if do_http:
         print_report(stats, elapsed, passes)
     if do_dns:
         dns_gen.print_dns_report(dns_stats)
+    if do_files:
+        file_filter.print_file_report(file_stats)
 
 
 def print_report(stats: Stats, elapsed: float, passes: int):
@@ -392,6 +411,10 @@ def parse_args():
                    help="Also run a DNS/DGA query phase each pass (DNS filtering + Botnet C&C test).")
     p.add_argument("--dns-only", action="store_true",
                    help="Run only the DNS/DGA phase; skip HTTP entirely.")
+    p.add_argument("--files", action="store_true",
+                   help="Also run a File Filter phase each pass (upload generated file types + download real ones).")
+    p.add_argument("--files-only", action="store_true",
+                   help="Run only the File Filter phase; skip HTTP and DNS.")
     p.add_argument("--dga-count", type=int, default=None,
                    help="Override number of DGA domains generated per pass.")
     p.add_argument("--no-threat-feeds", action="store_true",

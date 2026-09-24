@@ -60,6 +60,46 @@ python web_gen.py --categories av_malware_eicar av_amtso --full-download -v
 | `--no-cache-bust` | Don't append a random query param to each URL. |
 | `-v` / `--verbose` | Print every request with its block/ok/err verdict. |
 
+## File Filter testing (block-exec / monitor-docs policies)
+
+[file_filter.py](file_filter.py) exercises FortiGate **File Filter** by moving an
+assortment of file *types* across the firewall in **both directions**:
+
+- **Upload** — generates small files locally with the correct **magic bytes**
+  (MZ/PE `.exe`/`.dll`, ELF, Mach-O, OLE2 `.doc`/`.msi`, OOXML `.docx`/`.xlsx`,
+  real + AES-encrypted `.zip`, `7z`/`rar`/`pdf`/`iso`/`dmg`/`torrent` signatures,
+  script text for `.bat`/`.hta`/`.jnlp`/…) and `POST`s them to an echo endpoint.
+- **Download** — GETs real, harmless public files (thinkbroadband zip, a signed
+  PuTTY `.exe`).
+
+File Filter matches on **type (magic) and extension, not content**, so the generated
+files are harmless but still detected/blocked. Nothing malicious is downloaded.
+
+Each type is tagged with its **expected** FortiGate action, and the report checks
+actual-vs-expected so a policy gap is obvious (`CHECK <-`):
+
+```
+type             expect    blocked  allowed   err  result
+exe              block           2        0     0  OK
+torrent          block           0        1     0  CHECK <-   <- policy not catching!
+zip              monitor         0        2     0  OK
+```
+
+The defaults align with a typical policy (block executables + images/torrents,
+monitor docs/archives). Edit `generate_types`, `download_urls`, and `upload_url` in
+the `file_filter` section of [config.json](config.json); adjust the `EXPECT` map in
+[file_filter.py](file_filter.py) to match your own rules.
+
+```powershell
+python web_gen.py --files            # add File Filter phase to a normal run
+python web_gen.py --files-only       # only the File Filter phase
+python file_filter.py                # standalone
+```
+
+> Encrypted-zip generation needs **pyzipper** (`pip install -r requirements.txt`); if
+> it's missing that one type is skipped with a note. Uploads go to a public echo
+> service (`postman-echo.com`) — change `upload_url` if you prefer another.
+
 ## External threat feeds (prove the FortiGate feeds are matching)
 
 The generator can pull the **same external threat-feed lists you point the FortiGate
