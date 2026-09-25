@@ -80,7 +80,7 @@ Control and GeoIP phases are **off** until you add their flag.
 | `--geo` / `--geo-only` | off | Add / isolate the GeoIP (sanctioned-country) phase. |
 | `--no-threat-feeds` | off (feeds on) | Disable the threat-feed mix-in. |
 | `--threat-rate R` | *(config: 0.025)* | Fraction of connections that are threat-feed targets. |
-| `--source-ips ...` | *(config: 6 lab IPs)* | Bind outgoing traffic to these local IPs; `""` = OS default. |
+| `--source-ips ...` | *(config: `auto`)* | Bind outgoing traffic to these local IPs; `auto` = all of this machine's IPs; `""` = OS default. |
 | `-v` / `--verbose` | off | Print every request/query with its verdict. |
 | `--list` | — | List web categories (with enabled/expect/weight) and exit. |
 
@@ -88,7 +88,7 @@ Control and GeoIP phases are **off** until you add their flag.
 
 | Setting | Default | Notes |
 |---------|---------|-------|
-| `source_ips` | 6 lab IPs (`10.21.1.10/.12/.15/.20/.32/.41`) | `[]` = OS default source. |
+| `source_ips` | `"auto"` | All IPv4s on this machine (skips loopback/169.254.x), or a list of IPs; `[]` = OS default source. |
 | all phases `enabled` | `true` | Phase still needs its CLI flag to run (except HTTP + threat feeds). |
 | `threat_feeds.mix_rate` | `0.025` (~2.5%) | Poll interval 600s. |
 | `dns.dga.count` | `300` | Plus suspicious + benign domains. |
@@ -284,8 +284,9 @@ If your lab VM has several IPs bound to its NIC (e.g. `10.21.1.10, .12, .15, .20
 FortiGate sees each IP as a separate client — separate policy matches, separate log
 sources, separate per-IP stats.
 
-Set them in the `source_ips` list in [config.json](config.json) (pre-filled with the
-lab IPs) or override at runtime:
+By default `source_ips` in [config.json](config.json) is `"auto"`: every IPv4 on the
+machine's NICs is used (loopback and 169.254.x skipped), so moving to a new VM needs no
+config change. To pin specific IPs, list them in config or override at runtime:
 
 ```powershell
 python web_gen.py --source-ips 10.21.1.10 10.21.1.12 10.21.1.15 --dns
@@ -293,8 +294,9 @@ python web_gen.py --source-ips 10.21.1.10 10.21.1.12 10.21.1.15 --dns
 
 Both HTTP (aiohttp `local_addr`) and DNS (pycares `local_ip`) are bound. The results
 report includes a **by source IP** breakdown. Each IP must already be assigned to a
-NIC on the machine — binding to an unassigned IP just yields connection errors (shown
-in the report), not a crash. An empty `source_ips` list uses the OS default source.
+NIC on the machine — at startup each one is test-bound, and any that aren't are listed
+(with the machine's actual IPs) before the run aborts. An empty `source_ips` list uses
+the OS default source.
 
 > To add the IPs in Windows: *Network adapter → IPv4 properties → Advanced → IP
 > addresses → Add* (the dialog in your screenshot), or

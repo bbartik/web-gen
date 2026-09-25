@@ -28,6 +28,7 @@ import asyncio
 import hashlib
 import json
 import random
+import socket
 import string
 import sys
 from collections import defaultdict
@@ -210,6 +211,51 @@ def build_domain_list(dns_cfg, dga_count=None, rng=None):
     return domains
 
 
+def local_ipv4s():
+    """Best-effort list of IPv4 addresses assigned to this machine's NICs."""
+    try:
+        infos = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
+    except OSError:
+        return []
+    return sorted({info[4][0] for info in infos})
+
+
+def resolve_source_ips(cli_ips, cfg_ips):
+    """CLI overrides config. "auto" (or ["auto"]) = every IPv4 on this machine except
+    loopback / link-local. Returns a list, or [None] for OS default source selection."""
+    ips = cli_ips if cli_ips is not None else cfg_ips
+    if isinstance(ips, str):
+        ips = [ips]
+    ips = [ip for ip in (ips or []) if ip]
+    if [ip.lower() for ip in ips] == ["auto"]:
+        ips = [ip for ip in local_ipv4s()
+               if not ip.startswith(("127.", "169.254."))]
+    return ips or [None]
+
+
+def check_source_ips(source_ips):
+    """Exit with a clear message if any configured source IP isn't on this machine.
+    Binding is the authoritative test - it's exactly what the traffic phases do."""
+    bad = []
+    for ip in source_ips:
+        if not ip:
+            continue
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((ip, 0))
+        except OSError:
+            bad.append(ip)
+    if bad:
+        print("ERROR: these source_ips are not assigned to this machine:", file=sys.stderr)
+        for ip in bad:
+            print(f"    {ip}", file=sys.stderr)
+        print(f"  this machine's IPs: {', '.join(local_ipv4s()) or '(could not detect)'}",
+              file=sys.stderr)
+        print("  fix 'source_ips' in config.json (or pass --source-ips), then re-run.",
+              file=sys.stderr)
+        sys.exit(2)
+
+
 def _make_resolvers(timeout, servers, source_ips):
     """One resolver per source IP (bound via pycares local_ip); [None] = default."""
     ips = source_ips or [None]
@@ -288,8 +334,8 @@ def parse_args():
     p.add_argument("--iterations", type=int, default=1)
     p.add_argument("--servers", nargs="*", help="Override DNS server(s) instead of the OS default.")
     p.add_argument("--source-ips", nargs="*", metavar="IP", default=None,
-                   help="Bind queries to these local source IPs (round-robin). "
-                        "Overrides 'source_ips' in config.json.")
+                   help="Bind queries to these local source IPs (round-robin), or 'auto' "
+                        "for all of this machine's IPs. Overrides 'source_ips' in config.json.")
     p.add_argument("--sample", action="store_true", help="Print a sample of generated DGA domains and exit.")
     p.add_argument("--verbose", "-v", action="store_true")
     return p.parse_args()
@@ -312,8 +358,8 @@ def main():
     with config_path.open(encoding="utf-8") as fh:
         full_cfg = json.load(fh)
     dns_cfg = full_cfg.get("dns", {})
-    source_ips = args.source_ips if args.source_ips is not None else full_cfg.get("source_ips", [])
-    source_ips = [ip for ip in source_ips if ip] or [None]
+    source_ips = resolve_source_ips(args.source_ips, full_cfg.get("source_ips", []))
+    check_source_ips(source_ips)
 
     if args.sample:
         rng = random.Random()

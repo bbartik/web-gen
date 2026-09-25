@@ -165,7 +165,7 @@ async def fetch(session, sem, category, url, expect, stats, args, src_ip=None):
             stats.errors += 1
             stats.per_category[category]["conn_error"] += 1
             if args.verbose:
-                print(f"[CERR ] ----- {category:24} {url}  ({type(exc).__name__})")
+                print(f"[CERR ] ----- {category:24} {url}  ({type(exc).__name__}: {exc})")
         except Exception as exc:  # noqa: BLE001 - lab tool, keep firing
             stats.errors += 1
             stats.per_category[category]["error"] += 1
@@ -203,8 +203,8 @@ async def run(args):
 
     # Source IPs to bind outgoing traffic to (CLI overrides config). Each becomes a
     # distinct client on the FortiGate. [None] = OS default source selection.
-    source_ips = args.source_ips if args.source_ips is not None else full_cfg.get("source_ips", [])
-    source_ips = [ip for ip in source_ips if ip] or [None]
+    source_ips = dns_gen.resolve_source_ips(args.source_ips, full_cfg.get("source_ips", []))
+    dns_gen.check_source_ips(source_ips)
 
     # Threat-feed mixing (CLI overrides config).
     tf_cfg = dict(full_cfg.get("threat_feeds", {}))
@@ -493,8 +493,8 @@ def parse_args():
     p.add_argument("--source-ips", nargs="*", metavar="IP", default=None,
                    help="Bind outgoing traffic to these local source IPs (round-robin), "
                         "so each shows up as a separate client on the FortiGate. "
-                        "Overrides 'source_ips' in config.json. Must already be assigned "
-                        "to a NIC on this machine.")
+                        "'auto' = every IPv4 on this machine's NICs. Overrides 'source_ips' "
+                        "in config.json. Must already be assigned to a NIC on this machine.")
     p.add_argument("--verbose", "-v", action="store_true",
                    help="Print every request result.")
     p.add_argument("--list", action="store_true",
