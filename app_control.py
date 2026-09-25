@@ -22,6 +22,7 @@ import os
 import random
 import socket
 import sys
+import threading
 import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -229,6 +230,31 @@ def _tor_probe_blocking(target_host, target_port):
                 return bool(data), f"circuit ok, {len(data)}B via Tor"
 
 
+def _run_in_daemon_thread(fn, *args):
+    """Like asyncio.to_thread, but in a daemon thread. torpy blocks on sockets and
+    retries guards for minutes; a daemon thread lets Ctrl+C / timeout exit promptly
+    instead of the interpreter waiting on the executor at shutdown."""
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+
+    def _settle(setter, value):
+        if not fut.done():
+            setter(value)
+
+    def worker():
+        try:
+            outcome = (fut.set_result, fn(*args))
+        except BaseException as exc:  # noqa: BLE001
+            outcome = (fut.set_exception, exc)
+        try:
+            loop.call_soon_threadsafe(_settle, *outcome)
+        except RuntimeError:  # loop already closed (timed out / Ctrl+C)
+            pass
+
+    threading.Thread(target=worker, name="tor-probe", daemon=True).start()
+    return fut
+
+
 async def tor_probe(stats, verbose, target_host="example.com", target_port=80, timeout=90):
     if TorClient is None:
         print("[app-control] torpy not installed - skipping Tor (pip install torpy)")
@@ -241,7 +267,7 @@ async def tor_probe(stats, verbose, target_host="example.com", target_port=80, t
     # proof of a block - confirm in the FortiGate App Control log.
     try:
         ok, detail = await asyncio.wait_for(
-            asyncio.to_thread(_tor_probe_blocking, target_host, target_port), timeout=timeout)
+            _run_in_daemon_thread(_tor_probe_blocking, target_host, target_port), timeout=timeout)
         _record(stats, "tor", "passed" if ok else "error", verbose, detail, None)
     except asyncio.TimeoutError:
         _record(stats, "tor", "error", verbose,
