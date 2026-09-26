@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-web_gen.py - Comprehensive async web traffic generator for FortiGate labs.
+web_gen.py - Comprehensive traffic generator for SWG / NGFW security testing.
 
 Fires large volumes of concurrent HTTP(S) requests at categorized target lists
 (malware/EICAR, phishing, gambling, hacking, proxy-avoidance, etc.) so you can
-watch FortiGate web filtering, antivirus, and app control light up.
+watch web filtering, antivirus, and app control light up on the device under test.
 
-Runs on a lab VM behind the FortiGate. All targets are either harmless industry
+Runs on a lab VM behind the firewall / SWG under test. All targets are either harmless industry
 test files (EICAR/AMTSO/WICAR/testmyids) or public sites that fall into a
-FortiGuard category. Nothing here attacks anything - it only requests pages.
+URL-filtering category. Nothing here attacks anything - it only requests pages.
 
 Usage examples:
     python web_gen.py                          # one pass over every enabled category
@@ -40,6 +40,10 @@ import file_filter  # noqa: E402
 import ips as ips_mod  # noqa: E402
 import app_control  # noqa: E402
 import geoip  # noqa: E402
+import browser_sim  # noqa: E402
+import ai_sim  # noqa: E402
+import blockpages  # noqa: E402
+import wildfire  # noqa: E402
 
 
 USER_AGENTS = [
@@ -50,8 +54,8 @@ USER_AGENTS = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
 ]
 
-# Substrings that appear in a FortiGate web-filter / AV block page.
-FORTI_BLOCK_MARKERS = (
+# Web-filter / AV block-page markers (on top of blockpages.STRONG_PHRASES).
+BLOCK_MARKERS = (
     "web page blocked",
     "fortiguard",
     "url blocked",
@@ -107,9 +111,9 @@ def bust_cache(url: str) -> str:
 
 def classify(status: int, body_snippet: str) -> str:
     low = body_snippet.lower()
-    if any(marker in low for marker in FORTI_BLOCK_MARKERS):
+    if blockpages.looks_blocked(low) or any(marker in low for marker in BLOCK_MARKERS):
         return "blocked"
-    if status in (403, 451, 503) and "forti" in low:
+    if status in (403, 451, 503) and blockpages.names_vendor(low):
         return "blocked"
     if 200 <= status < 400:
         return "ok"
@@ -132,7 +136,7 @@ async def fetch(session, sem, category, url, expect, stats, args, src_ip=None):
                 request_url,
                 headers=headers,
                 allow_redirects=not args.no_redirects,
-                ssl=False,  # lab: don't fail on the FortiGate's cert / self-signed block page
+                ssl=False,  # lab: don't fail on the firewall's cert / self-signed block page
             ) as resp:
                 # Read a small slice - enough to sniff a block page without huge downloads,
                 # unless --full-download is set (useful to actually pull the EICAR file).
@@ -185,10 +189,15 @@ async def run(args):
     ips_cfg = full_cfg.get("ips", {})
     ac_cfg = full_cfg.get("app_control", {})
     geo_cfg = full_cfg.get("geoip", {})
+    ai_cfg = full_cfg.get("ai", {})
+    wf_cfg = full_cfg.get("wildfire", {})
+    br_cfg = browser_sim.apply_cli(full_cfg.get("browser", {}), args.personas,
+                                   args.browser_headed, args.browser_workers)
     # A *-only flag restricts the run to just that phase. A phase runs if its flag
     # (or its -only flag) is set, it's enabled, and no OTHER *-only is in effect.
     any_only = (args.dns_only or args.files_only or args.ips_only or args.apps_only
-                or args.geo_only)
+                or args.geo_only or args.browser_only or args.ai_only
+                or args.wildfire_only)
 
     def phase_on(flag, only_flag, enabled=True):
         return (flag or only_flag) and enabled and (not any_only or only_flag)
@@ -199,10 +208,13 @@ async def run(args):
     do_ips = phase_on(args.ips, args.ips_only, ips_cfg.get("enabled", True))
     do_apps = phase_on(args.apps, args.apps_only, ac_cfg.get("enabled", True))
     do_geo = phase_on(args.geo, args.geo_only, geo_cfg.get("enabled", True))
+    do_wf = phase_on(args.wildfire, args.wildfire_only, wf_cfg.get("enabled", True))
+    do_ai = phase_on(args.ai, args.ai_only, ai_cfg.get("enabled", True))
+    do_browser = phase_on(args.browser, args.browser_only, br_cfg.get("enabled", True))
     geo_feeds = geoip.GeoFeeds(geo_cfg) if do_geo else None
 
     # Source IPs to bind outgoing traffic to (CLI overrides config). Each becomes a
-    # distinct client on the FortiGate. [None] = OS default source selection.
+    # distinct client on the firewall. [None] = OS default source selection.
     source_ips = dns_gen.resolve_source_ips(args.source_ips, full_cfg.get("source_ips", []))
     dns_gen.check_source_ips(source_ips)
 
@@ -221,7 +233,7 @@ async def run(args):
             sys.exit("No HTTP targets selected. Check --categories or enable some in config.json.")
 
     print("=" * 70)
-    print("FortiGate lab web traffic generator")
+    print("SWG / NGFW traffic generator")
     print("=" * 70)
     # Weighted pool: each target repeated 'weight' times so higher-weight
     # (normal) categories are hit proportionally more often.
@@ -255,6 +267,23 @@ async def run(args):
     if do_geo:
         print(f"  geoip        : on ({len(geo_feeds.countries)} countries, "
               f"{geo_feeds.ips_per_country} ips each/pass)")
+    if do_wf:
+        n_test = (len(wf_cfg.get("test_files", wildfire.DEFAULT_TEST_FILES))
+                  if wf_cfg.get("test_files_enabled", True) else 0)
+        n_uniq = (len(wildfire.generate_files(wf_cfg.get("unique_types")))
+                  if wf_cfg.get("unique_files_enabled", True) else 0)
+        print(f"  wildfire     : on ({n_test} vendor test files + {n_uniq} unique files "
+              f"up/down per pass)")
+    if do_ai:
+        n_prov = sum(1 for p in ai_cfg.get("providers", ai_sim.DEFAULT_PROVIDERS)
+                     if p.get("enabled", True))
+        print(f"  genai api    : on ({n_prov} providers x "
+              f"{ai_cfg.get('prompts_per_provider', 3)} prompts + uploads, placeholder keys)")
+    if do_browser:
+        n_p = sum(1 for p in br_cfg.get("personas", {}).values() if p.get("enabled", True))
+        print(f"  browser      : on ({n_p} personas, {br_cfg.get('workers', 3)} parallel, "
+              f"{'headless' if br_cfg.get('headless', True) else 'headed'} "
+              f"{br_cfg.get('channel') or 'chromium'})")
     if do_threat:
         print(f"  threat feeds : on (~{tf.mix_rate*100:.1f}% of connections, "
               f"poll {int(tf.poll_interval)}s)")
@@ -273,6 +302,9 @@ async def run(args):
     ips_stats = ips_mod.IpsStats()
     app_stats = app_control.AppStats()
     geo_stats = geoip.GeoStats()
+    browser_stats = browser_sim.BrowserStats()
+    ai_stats = ai_sim.AiStats()
+    wf_stats = wildfire.WildfireStats()
     sem = asyncio.Semaphore(args.concurrency)
     timeout = aiohttp.ClientTimeout(total=args.timeout)
 
@@ -354,6 +386,24 @@ async def run(args):
                     geo_feeds, sessions, sem, stats=geo_stats, verbose=args.verbose,
                 )
 
+            if do_wf:
+                await wildfire.run_wildfire_phase(
+                    wf_cfg, sessions, sem, stats=wf_stats, verbose=args.verbose,
+                    upload_url=ff_cfg.get("upload_url"),
+                )
+
+            if do_ai:
+                await ai_sim.run_ai_phase(
+                    ai_cfg, sessions, sem, stats=ai_stats, verbose=args.verbose,
+                )
+
+            if do_browser:
+                await browser_sim.run_browser_phase(
+                    br_cfg, categories=full_cfg.get("categories", {}),
+                    source_ips=source_ips, stats=browser_stats, verbose=args.verbose,
+                    prompts=ai_sim.build_prompts(ai_cfg),
+                )
+
             if args.delay:
                 await asyncio.sleep(args.delay)
 
@@ -383,6 +433,12 @@ async def run(args):
         app_control.print_app_report(app_stats)
     if do_geo:
         geoip.print_geo_report(geo_stats)
+    if do_wf:
+        wildfire.print_wildfire_report(wf_stats)
+    if do_ai:
+        ai_sim.print_ai_report(ai_stats)
+    if do_browser:
+        browser_sim.print_browser_report(browser_stats)
 
 
 def print_report(stats: Stats, elapsed: float, passes: int):
@@ -430,7 +486,7 @@ def list_categories(config_path: Path):
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Comprehensive async web traffic generator for FortiGate labs.",
+        description="Comprehensive traffic generator for SWG / NGFW security testing.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--config", default="config.json", help="Path to target config.")
@@ -483,6 +539,27 @@ def parse_args():
                    help="Also run a GeoIP phase (traffic to IPs in sanctioned countries).")
     p.add_argument("--geo-only", action="store_true",
                    help="Run only the GeoIP phase.")
+    p.add_argument("--wildfire", action="store_true",
+                   help="Also run a WildFire / sandbox phase (vendor test files that come back "
+                        "malicious + unique harmless files uploaded and downloaded).")
+    p.add_argument("--wildfire-only", action="store_true",
+                   help="Run only the WildFire / sandbox phase.")
+    p.add_argument("--ai", action="store_true",
+                   help="Also run a GenAI API phase (benign / prompt-injection / synthetic-DLP "
+                        "prompts + file uploads to AI provider APIs, placeholder keys).")
+    p.add_argument("--ai-only", action="store_true",
+                   help="Run only the GenAI API phase.")
+    p.add_argument("--browser", action="store_true",
+                   help="Also run a real-browser phase (video, browsing, search, social/SaaS, "
+                        "downloads) driven by the 'browser' personas in config.json.")
+    p.add_argument("--browser-only", action="store_true",
+                   help="Run only the real-browser phase.")
+    p.add_argument("--personas", nargs="*", metavar="NAME",
+                   help="With --browser, only run these personas.")
+    p.add_argument("--browser-headed", action="store_true",
+                   help="Show the browser windows instead of running headless.")
+    p.add_argument("--browser-workers", type=int, default=None, metavar="N",
+                   help="Parallel browsers (overrides 'workers' in config.json).")
     p.add_argument("--dga-count", type=int, default=None,
                    help="Override number of DGA domains generated per pass.")
     p.add_argument("--no-threat-feeds", action="store_true",
@@ -492,7 +569,7 @@ def parse_args():
                         "Overrides 'mix_rate' in config.json.")
     p.add_argument("--source-ips", nargs="*", metavar="IP", default=None,
                    help="Bind outgoing traffic to these local source IPs (round-robin), "
-                        "so each shows up as a separate client on the FortiGate. "
+                        "so each shows up as a separate client on the firewall. "
                         "'auto' = every IPv4 on this machine's NICs. Overrides 'source_ips' "
                         "in config.json. Must already be assigned to a NIC on this machine.")
     p.add_argument("--verbose", "-v", action="store_true",

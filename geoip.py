@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
 geoip.py - Generate traffic to IPs allocated to embargoed / sanctioned countries so
-FortiGate GeoIP (destination-country) firewall policies match and block it.
+firewall GeoIP (destination-country) firewall policies match and block it.
 
 Pulls per-country IPv4 CIDR lists (default: ipdeny.com aggregated zones), picks
 random hosts in each country, and makes an HTTP connection to them. Optionally also
 hits known in-country domains for a cleaner client-side signal.
 
 Client-side block detection is best-effort: a GeoIP block is usually a silent drop or
-reset, and random in-country IPs may not answer anyway - so the FortiGate policy log
+reset, and random in-country IPs may not answer anyway - so the firewall policy log
 (showing the destination country + block action) is the authoritative proof. This
 tool's job is to GENERATE the connections.
 
 SAFETY: connects to ordinary IP allocations by country, reads at most a few KB, saves
-nothing. Use only against your own lab FortiGate. Some destinations are simply
+nothing. Use only against your own lab firewall. Some destinations are simply
 addresses in a country's range and may not host anything.
 
 Imported by web_gen.py (--geo / --geo-only) or run standalone.
@@ -33,6 +33,8 @@ try:
     import aiohttp
 except ImportError:
     aiohttp = None
+
+import blockpages
 
 # Sanctioned / embargoed countries (ISO 3166-1 alpha-2 + name). Mirrors the common
 # EAR / ITAR / OFAC lists. Trim or extend in config.json.
@@ -138,15 +140,15 @@ async def geo_one(session, sem, cc, name, url, stats, verbose, src_ip):
             async with session.get(url, ssl=False) as resp:
                 chunk = await resp.content.read(4096)
                 low = chunk.decode("utf-8", "ignore").lower()
-                if "forti" in low and any(m in low for m in BLOCK_MARKERS):
+                if blockpages.looks_blocked(low, BLOCK_MARKERS):
                     result = "blocked"
                 else:
                     result = "reached"
         except (aiohttp.ServerDisconnectedError, aiohttp.ClientConnectionError,
                 ConnectionResetError):
-            result = "blocked"          # RST - often the FortiGate GeoIP drop
+            result = "blocked"          # RST - often the firewall GeoIP drop
         except asyncio.TimeoutError:
-            result = "no_response"       # dead IP or silent drop - check FortiGate log
+            result = "no_response"       # dead IP or silent drop - check firewall log
         except aiohttp.ClientError:
             result = "no_response"
         except Exception:  # noqa: BLE001
@@ -184,7 +186,7 @@ async def run_geo_phase(feeds, sessions, sem, stats=None, verbose=False, rng=Non
 
 def print_geo_report(stats: GeoStats):
     print("\n" + "=" * 70)
-    print("GEOIP RESULTS  (best-effort; FortiGate GeoIP policy log is authoritative)")
+    print("GEOIP RESULTS  (best-effort; firewall GeoIP policy log is authoritative)")
     print("=" * 70)
     print(f"  connections : {stats.total}")
     print(f"  blocked/RST : {stats.blocked}")
@@ -197,7 +199,7 @@ def print_geo_report(stats: GeoStats):
         d = stats.per_country[name]
         print(f"    {name:22} {d.get('blocked', 0):8} {d.get('reached', 0):6} "
               f"{d.get('no_response', 0):7} {d.get('error', 0):5}")
-    print("\n  -> confirm blocks by destination country in the FortiGate policy log.")
+    print("\n  -> confirm blocks by destination country in the firewall policy log.")
     print("=" * 70)
 
 
@@ -214,7 +216,7 @@ async def _standalone(cfg, concurrency):
 
 def main():
     import argparse
-    p = argparse.ArgumentParser(description="FortiGate GeoIP (sanctioned-country) traffic generator.")
+    p = argparse.ArgumentParser(description="firewall GeoIP (sanctioned-country) traffic generator.")
     p.add_argument("--config", default="config.json")
     p.add_argument("--concurrency", type=int, default=30)
     args = p.parse_args()

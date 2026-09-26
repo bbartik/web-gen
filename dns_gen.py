@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-dns_gen.py - Async DNS traffic generator for FortiGate labs.
+dns_gen.py - Async DNS traffic generator for SWG / NGFW testing.
 
-Fires large volumes of DNS queries to exercise FortiGate **DNS filtering** and
+Fires large volumes of DNS queries to exercise firewall **DNS filtering** and
 **Botnet C&C / DGA detection**:
 
   * DGA (Domain Generation Algorithm) domains - high-entropy and dictionary-style,
@@ -16,7 +16,7 @@ Detects blocking two ways:
   * Responses pointing at a FortiGuard block/sinkhole IP (configurable) -> "blocked".
 
 Uses aiodns (c-ares) for true async resolution at scale. Queries go to whatever
-DNS server the OS is configured to use - i.e. through the FortiGate.
+DNS server the OS is configured to use - i.e. through the firewall.
 
 Standalone:
     python dns_gen.py --dga-count 500 --concurrency 300 -v
@@ -32,6 +32,7 @@ import socket
 import string
 import sys
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -51,7 +52,10 @@ if sys.platform == "win32":
 
 
 # FortiGuard DNS filter redirects blocked lookups to these portal IPs by default.
-DEFAULT_BLOCK_IPS = ["208.91.112.55", "208.91.112.52", "208.91.112.53"]
+# FortiGuard block IPs + Palo Alto default sinkholes (sinkhole.paloaltonetworks.com,
+# its older address, and the IPv6 default ::1).
+DEFAULT_BLOCK_IPS = ["208.91.112.55", "208.91.112.52", "208.91.112.53",
+                     "72.5.65.111", "71.19.152.112", "::1"]
 
 DGA_TLDS = [".com", ".net", ".org", ".info", ".biz", ".ru", ".cn", ".xyz",
             ".top", ".club", ".online", ".site", ".su", ".cc", ".ws"]
@@ -220,16 +224,33 @@ def local_ipv4s():
     return sorted({info[4][0] for info in infos})
 
 
+AUTO_PROBE = ("www.msftconnecttest.com", 80)  # Windows' own connectivity-check host
+
+
+def _can_reach(ip, probe=AUTO_PROBE, timeout=3.0):
+    try:
+        with socket.create_connection(probe, timeout=timeout, source_address=(ip, 0)):
+            return True
+    except OSError:
+        return False
+
+
 def resolve_source_ips(cli_ips, cfg_ips):
-    """CLI overrides config. "auto" (or ["auto"]) = every IPv4 on this machine except
-    loopback / link-local. Returns a list, or [None] for OS default source selection."""
+    """CLI overrides config. "auto" (or ["auto"]) = every IPv4 on this machine that can
+    actually reach the internet (skips loopback, link-local, and virtual adapters with
+    no route out, e.g. Hyper-V/WSL switches). Returns a list, or [None] for OS default."""
     ips = cli_ips if cli_ips is not None else cfg_ips
     if isinstance(ips, str):
         ips = [ips]
     ips = [ip for ip in (ips or []) if ip]
     if [ip.lower() for ip in ips] == ["auto"]:
-        ips = [ip for ip in local_ipv4s()
-               if not ip.startswith(("127.", "169.254."))]
+        candidates = [ip for ip in local_ipv4s() if not ip.startswith(("127.", "169.254."))]
+        with ThreadPoolExecutor(max_workers=max(1, len(candidates))) as pool:
+            reachable = list(pool.map(_can_reach, candidates))
+        ips = [ip for ip, ok in zip(candidates, reachable) if ok]
+        skipped = [ip for ip, ok in zip(candidates, reachable) if not ok]
+        if skipped:
+            print(f"source ips auto: skipping {', '.join(skipped)} (no route out)")
     return ips or [None]
 
 
@@ -325,7 +346,7 @@ def print_dns_report(stats: DnsStats):
 # --------------------------------------------------------------------------- #
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Async DNS / DGA traffic generator for FortiGate labs.")
+    p = argparse.ArgumentParser(description="Async DNS / DGA traffic generator for SWG / NGFW testing.")
     p.add_argument("--config", default="config.json")
     p.add_argument("--concurrency", type=int, default=200)
     p.add_argument("--timeout", type=float, default=5.0)

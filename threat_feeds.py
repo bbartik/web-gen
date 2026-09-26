@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 threat_feeds.py - Pull external threat-feed lists and mix a small, random
-assortment of them into the generated traffic, to demonstrate that FortiGate
+assortment of them into the generated traffic, to demonstrate that firewall
 external threat feeds (URL / Domain / IP block lists) are matching.
 
-Feeds are the same lists you point the FortiGate at (URLhaus, OpenPhish, Spamhaus,
+Feeds are the same lists you point the firewall at (URLhaus, OpenPhish, Spamhaus,
 Feodo, ...). Entries:
   * urls    - scheme-less URLs (host[:port]/path)  -> HTTP GET  http://<entry>
   * ips     - IPs or CIDRs                          -> HTTP GET  http://<host>/
@@ -12,7 +12,7 @@ Feodo, ...). Entries:
 
 SAFETY: these are real malicious indicators. This module never downloads full
 bodies from feed targets and never saves them - it only makes the connection so
-the FortiGate can match/block it. Only run behind a FortiGate that is actually
+the firewall can match/block it. Only run behind a firewall that is actually
 enforcing these feeds.
 """
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-app_control.py - Generate real application-protocol traffic to exercise FortiGate
+app_control.py - Generate real application-protocol traffic to exercise firewall
 Application Control (App Control uses DPI on protocol behavior, not URLs).
 
 Covers:
@@ -8,16 +8,17 @@ Covers:
                  and DHT ping (UDP bencode) to real DHT bootstrap nodes.
   * Proxy      - HTTP CONNECT and absolute-URI requests (proxy semantics).
   * Tor        - a REAL Tor circuit via torpy (pure-Python Tor client), which
-                 puts genuine Tor TLS on the wire for the FortiGate to detect.
+                 puts genuine Tor TLS on the wire for the firewall to detect.
 
 Client-side block detection is best-effort: an App Control block is a mid-session
 reset, which is hard to tell from an ordinary reset. The authoritative proof is the
-FortiGate App Control log/widget - this tool's job is to GENERATE the traffic.
+firewall App Control / App-ID log - this tool's job is to GENERATE the traffic.
 
 Imported by web_gen.py (--apps / --apps-only) or run standalone.
 """
 
 import asyncio
+import logging
 import os
 import random
 import socket
@@ -32,6 +33,8 @@ try:
     import aiohttp
 except ImportError:
     aiohttp = None
+
+import blockpages
 
 import ssl as _ssl
 # torpy (unmaintained) calls ssl.wrap_socket, removed in Python 3.12+. Shim it with a
@@ -126,7 +129,7 @@ async def bt_announce(session, sem, tracker, stats, verbose, src_ip):
             async with session.get(url, headers=headers, ssl=False) as resp:
                 chunk = await resp.content.read(4096)
                 low = chunk.decode("utf-8", "ignore").lower()
-                result = "blocked" if ("forti" in low and any(m in low for m in BLOCK_MARKERS)) else "passed"
+                result = "blocked" if blockpages.looks_blocked(low, BLOCK_MARKERS) else "passed"
                 _record(stats, "bittorrent-announce", result, verbose, tracker, src_ip)
         except (aiohttp.ServerDisconnectedError, aiohttp.ClientConnectionError,
                 ConnectionResetError):
@@ -255,26 +258,42 @@ def _run_in_daemon_thread(fn, *args):
     return fut
 
 
+class _GuardLogHandler(logging.Handler):
+    """Surface torpy's (INFO-level) guard-connect lines so you know which relay
+    IP:port to look for in the firewall logs."""
+
+    def emit(self, record):
+        msg = record.getMessage()
+        if msg.startswith("Connecting to guard node"):
+            print(f"[app-control] tor: {msg}")
+
+
 async def tor_probe(stats, verbose, target_host="example.com", target_port=80, timeout=90):
     if TorClient is None:
         print("[app-control] torpy not installed - skipping Tor (pip install torpy)")
         return
     if verbose:
         print("[app-control] building real Tor circuit (may take 10-40s)...")
+        print("[app-control] tor: torpy uses the OS default source IP (not source_ips); "
+              "filter firewall logs on the guard IPs below")
+        guard_log = logging.getLogger("torpy.guard")
+        if not any(isinstance(h, _GuardLogHandler) for h in guard_log.handlers):
+            guard_log.addHandler(_GuardLogHandler())
+        guard_log.setLevel(logging.INFO)
     # Either way, torpy makes real TLS connections to Tor guard relays - that is the
     # traffic App Control detects. Whether the circuit *completes* depends on the
-    # network (and whether the FortiGate blocks Tor), so a failure is not, by itself,
-    # proof of a block - confirm in the FortiGate App Control log.
+    # network (and whether the firewall blocks Tor), so a failure is not, by itself,
+    # proof of a block - confirm in the firewall App Control / App-ID log.
     try:
         ok, detail = await asyncio.wait_for(
             _run_in_daemon_thread(_tor_probe_blocking, target_host, target_port), timeout=timeout)
         _record(stats, "tor", "passed" if ok else "error", verbose, detail, None)
     except asyncio.TimeoutError:
         _record(stats, "tor", "error", verbose,
-                "circuit not established in time (Tor traffic still sent - check FortiGate log)", None)
+                "circuit not established in time (Tor traffic still sent - check firewall log)", None)
     except Exception as exc:  # noqa: BLE001
         _record(stats, "tor", "error", verbose,
-                f"circuit not established ({type(exc).__name__}) - Tor traffic still sent, check FortiGate log", None)
+                f"circuit not established ({type(exc).__name__}: {exc}) - Tor traffic still sent, check firewall log", None)
 
 
 # --------------------------------------------------------------------------- #
@@ -330,7 +349,7 @@ async def run_app_phase(cfg, sessions, sem, stats=None, verbose=False,
 
 def print_app_report(stats: AppStats):
     print("\n" + "=" * 70)
-    print("APP CONTROL RESULTS  (best-effort; FortiGate App Control log is authoritative)")
+    print("APP CONTROL RESULTS  (best-effort; firewall App Control / App-ID log is authoritative)")
     print("=" * 70)
     print(f"  sessions  : {stats.total}")
     print(f"  blocked?  : {stats.blocked}   (reset mid-session - may be App Control)")
@@ -341,7 +360,7 @@ def print_app_report(stats: AppStats):
     for app in sorted(stats.per_app):
         d = stats.per_app[app]
         print(f"    {app:22} {d.get('blocked', 0):9} {d.get('passed', 0):7} {d.get('error', 0):5}")
-    print("\n  -> confirm actual detections in the FortiGate App Control log/widget.")
+    print("\n  -> confirm actual detections in the firewall App Control / App-ID log.")
     print("=" * 70)
 
 
@@ -356,7 +375,7 @@ async def _standalone(cfg, concurrency, do_tor):
 
 def main():
     import argparse
-    p = argparse.ArgumentParser(description="FortiGate Application Control traffic generator.")
+    p = argparse.ArgumentParser(description="Application Control / App-ID traffic generator.")
     p.add_argument("--config", default="config.json")
     p.add_argument("--concurrency", type=int, default=10)
     p.add_argument("--no-tor", action="store_true", help="Skip the Tor circuit.")

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
 ips.py - Fire an assortment of well-known IPS signature patterns to validate
-FortiGate Intrusion Prevention.
+firewall Intrusion Prevention.
 
 IPS inspects the pattern *in transit*, so a vulnerable target is NOT required -
-the patterns are simply carried in a request to a neutral sink and the FortiGate
+the patterns are simply carried in a request to a neutral sink and the firewall
 matches/blocks them on the wire. When IPS blocks, it typically resets the session
-(seen here as a connection reset) or returns a FortiGate IPS block page.
+(seen here as a connection reset) or returns a firewall IPS block page.
 
 SAFETY: patterns are public, well-known signatures; payload internals are inert
 (JNDI points at loopback; shell/SQL payloads hit an echo service with no shell or
 DB). This only *carries* the pattern for signature matching - it does not exploit
 anything and does not target a victim application. Use only against your own lab
-FortiGate.
+firewall.
 
 Imported by web_gen.py (--ips / --ips-only) or run standalone.
 """
@@ -29,6 +29,8 @@ try:
     import aiohttp
 except ImportError:
     aiohttp = None
+
+import blockpages
 
 BLOCK_MARKERS = (
     "web page blocked", "fortiguard", "intrusion", "ips", "attack",
@@ -116,10 +118,10 @@ async def fire_one(session, sem, trig, target_get, target_post, stats, verbose, 
                                        ssl=False, allow_redirects=False) as resp:
                 chunk = await resp.content.read(4096)
                 low = chunk.decode("utf-8", "ignore").lower()
-                # An IPS block is a reset or a FortiGate IPS block page. Getting ANY
+                # An IPS block is a reset or a firewall IPS block page. Getting ANY
                 # HTTP response back (even a 403 from the origin) means IPS did not
                 # act - the origin's own status is not our signal.
-                if any(m in low for m in BLOCK_MARKERS) and "forti" in low:
+                if blockpages.looks_blocked(low, BLOCK_MARKERS):
                     result = "blocked"
                 else:
                     result = "passed"
@@ -191,7 +193,7 @@ async def _standalone(cfg, concurrency):
 
 def main():
     import argparse
-    p = argparse.ArgumentParser(description="FortiGate IPS signature tester.")
+    p = argparse.ArgumentParser(description="firewall IPS signature tester.")
     p.add_argument("--config", default="config.json")
     p.add_argument("--concurrency", type=int, default=10)
     args = p.parse_args()

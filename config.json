@@ -1,10 +1,370 @@
 {
-  "_comment": "FortiGate lab web-filter / AV test target list. 'expect' (block|allow|mixed) is a reporting hint. 'weight' is relative hit frequency (higher = hit more often; normal traffic is weighted up). Toggle a category with \"enabled\": false. Edit freely for your lab.",
+  "_comment": "Web-filter / AV test target list. 'expect' (block|allow|mixed) is a reporting hint. 'weight' is relative hit frequency (higher = hit more often; normal traffic is weighted up). Toggle a category with \"enabled\": false. Edit freely for your lab.",
 
-  "_source_ips_comment": "Local source IPs to bind outgoing traffic to (round-robin), so each appears as a separate client on the FortiGate. 'auto' = every IPv4 on this machine's NICs (skips loopback/169.254.x), or list specific IPs, which must already be assigned to a NIC. Empty list = OS default. Override at runtime with --source-ips.",
+  "_source_ips_comment": "Local source IPs to bind outgoing traffic to (round-robin), so each appears as a separate client on the firewall. 'auto' = every IPv4 on this machine's NICs that can reach the internet (skips loopback/169.254.x/virtual adapters with no route out), or list specific IPs, which must already be assigned to a NIC. Empty list = OS default. Override at runtime with --source-ips.",
   "source_ips": "auto",
 
-  "_geoip_comment": "Generate traffic to IPs in embargoed/sanctioned countries so FortiGate GeoIP (destination-country) policies match. Per-country IPv4 CIDRs pulled from ipdeny.com aggregated zones. ips_per_country = random IPs hit per country per pass. Add {code,name,domain} entries to 'domains' for known in-country sites (cleaner signal). Run with --geo or --geo-only.",
+  "_wildfire_comment": "Sandbox / WildFire forwarding test (--wildfire / --wildfire-only). test_files: Palo Alto's official WildFire test files - harmless, but each download is a new sample WildFire rules MALICIOUS (end-to-end proof). http:// so they are inspectable without decryption; switch to https:// to also test decryption. unique_types: harmless files with random content (new hashes every run, so they must be forwarded, expect BENIGN), each uploaded to file_filter.upload_url and downloaded via an endpoint that echoes bytes from the URL. The report prints every generated SHA-256 to search in Monitor > WildFire Submissions. Needs a WildFire Analysis profile on the security rule.",
+  "wildfire": {
+    "enabled": true,
+    "test_files_enabled": true,
+    "test_files": [
+      "http://wildfire.paloaltonetworks.com/publicapi/test/pe",
+      "http://wildfire.paloaltonetworks.com/publicapi/test/elf",
+      "http://wildfire.paloaltonetworks.com/publicapi/test/macos",
+      "http://wildfire.paloaltonetworks.com/publicapi/test/apk"
+    ],
+    "unique_files_enabled": true,
+    "unique_types": [
+      "exe",
+      "dll",
+      "elf",
+      "pdf",
+      "pdf_js",
+      "docx",
+      "ps1",
+      "js",
+      "vbs",
+      "bat",
+      "zip_exe"
+    ],
+    "upload": true,
+    "download": true
+  },
+
+  "_ai_comment": "GenAI traffic for AI Access Security / GenAI App-ID / DLP. API phase (--ai / --ai-only) sends real chat requests to 11 AI provider APIs (list in ai_sim.py; override with a 'providers' list) using a PLACEHOLDER key: providers answer 401, but the full prompt has already crossed the firewall, which is what decryption + App-ID + DLP inspect. Nothing is answered or billed. Prompt sets: benign ('what is a VLAN'), injection (classic prompt-injection/jailbreak test strings, harmless payloads) and dlp (SYNTHETIC data only: published test card numbers, random SSNs/keys). 'mix' weights the sets; override any set with \"prompts\": {\"benign\": [...], \"injection\": [...], \"dlp\": [...]}. 'uploads' POSTs a synthetic customer-export CSV to provider file APIs. The browser persona 'genai_user' types the same prompts into ChatGPT/Gemini/Duck.ai. Preview: python ai_sim.py --show-prompts",
+  "ai": {
+    "enabled": true,
+    "prompts_per_provider": 3,
+    "mix": {
+      "benign": 5,
+      "injection": 3,
+      "dlp": 2
+    },
+    "uploads": true,
+    "api_key_placeholder": "sk-test-PLACEHOLDER-not-a-real-key-0000000000"
+  },
+
+  "_browser_comment": "Real headless browsers (Playwright) acting as users: video streaming, news browsing with link-following, web search, social/SaaS apps, GenAI chat (persona 'genai_user'), URL-filter category sites (type 'category' reuses 'categories' below), and file downloads. Each persona session launches a fresh browser; 'workers' run in parallel (~300-500 MB RAM each). Traffic is spread across source_ips via a local per-IP proxy. channel 'msedge' drives installed Edge (trusts the Windows cert store, so a firewall decryption CA just works); set null for bundled Chromium. QUIC is disabled so traffic stays inspectable TLS. Action types: browse, visit, search, video, download, category, chat. Run with --browser or --browser-only.",
+  "browser": {
+    "enabled": true,
+    "channel": "msedge",
+    "headless": true,
+    "workers": 3,
+    "disable_quic": true,
+    "ignore_https_errors": true,
+    "nav_timeout": 30,
+    "dwell": [
+      4,
+      10
+    ],
+    "follow_links": 2,
+    "watch_seconds": 45,
+    "personas": {
+      "video_watcher": {
+        "actions": [
+          {
+            "type": "video",
+            "queries": [
+              "lofi hip hop radio",
+              "nature documentary 4k",
+              "cooking tutorial pasta",
+              "tech review 2026"
+            ],
+            "watch_seconds": 60
+          },
+          {
+            "type": "video",
+            "list_url": "https://vimeo.com/channels/staffpicks",
+            "link_pattern": "vimeo\\.com/\\d{6,}$",
+            "watch_seconds": 30
+          },
+          {
+            "type": "visit",
+            "url": "https://www.twitch.tv/directory"
+          },
+          {
+            "type": "visit",
+            "url": "https://www.netflix.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://open.spotify.com/"
+          }
+        ]
+      },
+      "news_reader": {
+        "actions": [
+          {
+            "type": "browse",
+            "url": "https://www.bbc.com/news"
+          },
+          {
+            "type": "browse",
+            "url": "https://www.cnn.com/"
+          },
+          {
+            "type": "browse",
+            "url": "https://apnews.com/"
+          },
+          {
+            "type": "browse",
+            "url": "https://www.reuters.com/"
+          }
+        ]
+      },
+      "researcher": {
+        "actions": [
+          {
+            "type": "search",
+            "engine": "bing",
+            "queries": [
+              "how to configure ospf",
+              "best hiking trails colorado",
+              "python asyncio tutorial",
+              "weather this weekend"
+            ]
+          },
+          {
+            "type": "search",
+            "engine": "duckduckgo",
+            "queries": [
+              "kubernetes vs docker swarm",
+              "sourdough starter recipe"
+            ]
+          },
+          {
+            "type": "search",
+            "engine": "google",
+            "queries": [
+              "firewall best practices",
+              "nba scores"
+            ]
+          },
+          {
+            "type": "browse",
+            "url": "https://en.wikipedia.org/wiki/Special:Random",
+            "follow_links": 3
+          }
+        ]
+      },
+      "shopper": {
+        "actions": [
+          {
+            "type": "browse",
+            "url": "https://www.amazon.com/"
+          },
+          {
+            "type": "browse",
+            "url": "https://www.ebay.com/"
+          },
+          {
+            "type": "browse",
+            "url": "https://www.bestbuy.com/"
+          },
+          {
+            "type": "search",
+            "engine": "bing",
+            "queries": [
+              "wireless earbuds deals",
+              "standing desk review"
+            ]
+          }
+        ]
+      },
+      "social": {
+        "actions": [
+          {
+            "type": "browse",
+            "url": "https://www.reddit.com/r/technology/"
+          },
+          {
+            "type": "visit",
+            "url": "https://www.facebook.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://www.instagram.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://x.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://www.linkedin.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://www.tiktok.com/explore"
+          },
+          {
+            "type": "visit",
+            "url": "https://www.pinterest.com/"
+          }
+        ]
+      },
+      "saas_worker": {
+        "actions": [
+          {
+            "type": "visit",
+            "url": "https://www.office.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://outlook.live.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://teams.microsoft.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://www.dropbox.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://www.box.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://drive.google.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://zoom.us/"
+          },
+          {
+            "type": "visit",
+            "url": "https://slack.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://www.salesforce.com/"
+          },
+          {
+            "type": "browse",
+            "url": "https://github.com/trending"
+          }
+        ]
+      },
+      "risky_user": {
+        "actions": [
+          {
+            "type": "category",
+            "name": "gambling",
+            "count": 2
+          },
+          {
+            "type": "category",
+            "name": "proxy_avoidance",
+            "count": 2
+          },
+          {
+            "type": "category",
+            "name": "hacking",
+            "count": 2
+          },
+          {
+            "type": "category",
+            "name": "warez_p2p",
+            "count": 1
+          },
+          {
+            "type": "category",
+            "name": "phishing",
+            "count": 1
+          },
+          {
+            "type": "category",
+            "name": "drugs",
+            "count": 1
+          }
+        ]
+      },
+      "downloader": {
+        "actions": [
+          {
+            "type": "download",
+            "url": "https://secure.eicar.org/eicar.com.txt"
+          },
+          {
+            "type": "download",
+            "url": "http://wildfire.paloaltonetworks.com/publicapi/test/pe"
+          },
+          {
+            "type": "download",
+            "url": "https://the.earth.li/~sgtatham/putty/latest/w64/putty.exe"
+          },
+          {
+            "type": "download",
+            "url": "http://ipv4.download.thinkbroadband.com/5MB.zip"
+          },
+          {
+            "type": "download",
+            "url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+          }
+        ]
+      },
+      "genai_user": {
+        "actions": [
+          {
+            "type": "chat",
+            "url": "https://chatgpt.com/",
+            "prompts": 2
+          },
+          {
+            "type": "chat",
+            "url": "https://gemini.google.com/app",
+            "prompts": 2
+          },
+          {
+            "type": "chat",
+            "url": "https://duck.ai/",
+            "prompts": 2
+          },
+          {
+            "type": "visit",
+            "url": "https://claude.ai/"
+          },
+          {
+            "type": "visit",
+            "url": "https://copilot.microsoft.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://www.perplexity.ai/"
+          },
+          {
+            "type": "visit",
+            "url": "https://chat.deepseek.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://chat.mistral.ai/"
+          },
+          {
+            "type": "visit",
+            "url": "https://huggingface.co/chat/"
+          },
+          {
+            "type": "visit",
+            "url": "https://poe.com/"
+          },
+          {
+            "type": "visit",
+            "url": "https://character.ai/"
+          },
+          {
+            "type": "visit",
+            "url": "https://notebooklm.google.com/"
+          }
+        ]
+      }
+    }
+  },
+
+  "_geoip_comment": "Generate traffic to IPs in embargoed/sanctioned countries so firewall GeoIP (destination-country) policies match. Per-country IPv4 CIDRs pulled from ipdeny.com aggregated zones. ips_per_country = random IPs hit per country per pass. Add {code,name,domain} entries to 'domains' for known in-country sites (cleaner signal). Run with --geo or --geo-only.",
   "geoip": {
     "enabled": true,
     "cidr_url_template": "https://www.ipdeny.com/ipblocks/data/aggregated/{cc}-aggregated.zone",
@@ -39,7 +399,7 @@
     "domains": []
   },
 
-  "_app_control_comment": "Generate real application-protocol traffic for FortiGate Application Control (DPI, not URLs): BitTorrent (tracker announce + DHT), Proxy (HTTP CONNECT + absolute-URI), and Tor (real circuit via torpy). Client-side block detection is best-effort; the FortiGate App Control log is authoritative. Run with --apps or --apps-only.",
+  "_app_control_comment": "Generate real application-protocol traffic for Application Control / App-ID (DPI, not URLs): BitTorrent (tracker announce + DHT), Proxy (HTTP CONNECT + absolute-URI), and Tor (real circuit via torpy). Client-side block detection is best-effort; the firewall App Control / App-ID log is authoritative. Run with --apps or --apps-only.",
   "app_control": {
     "enabled": true,
     "bittorrent": {
@@ -67,14 +427,14 @@
     }
   },
 
-  "_ips_comment": "Validate FortiGate IPS by carrying well-known signature patterns (Shellshock, Log4Shell, SQLi, XSS, traversal, scanner UAs, GPL id-check) to a neutral sink. IMPORTANT: use a target with NO upstream WAF so blocks are unambiguously the FortiGate - http://example.com (IANA test domain, no WAF) or best of all a plain web server inside your lab. Avoid Cloudflare-fronted echo services, which block these themselves. Use http:// so IPS can inspect without SSL deep inspection. Run with --ips or --ips-only.",
+  "_ips_comment": "Validate firewall IPS by carrying well-known signature patterns (Shellshock, Log4Shell, SQLi, XSS, traversal, scanner UAs, GPL id-check) to a neutral sink. IMPORTANT: use a target with NO upstream WAF so blocks are unambiguously the firewall - http://example.com (IANA test domain, no WAF) or best of all a plain web server inside your lab. Avoid Cloudflare-fronted echo services, which block these themselves. Use http:// so IPS can inspect without SSL deep inspection. Run with --ips or --ips-only.",
   "ips": {
     "enabled": true,
     "target_url": "http://example.com/",
     "target_post_url": "http://example.com/"
   },
 
-  "_file_filter_comment": "Exercise FortiGate File Filter by uploading locally-generated files (correct magic bytes, harmless content) to upload_url AND downloading real harmless files. Types align with a typical block-exec / block-image / monitor-docs policy. Run with --files or --files-only.",
+  "_file_filter_comment": "Exercise firewall File Filter by uploading locally-generated files (correct magic bytes, harmless content) to upload_url AND downloading real harmless files. Types align with a typical block-exec / block-image / monitor-docs policy. Run with --files or --files-only.",
   "file_filter": {
     "enabled": true,
     "upload_url": "https://postman-echo.com/post",
@@ -89,7 +449,7 @@
     ]
   },
 
-  "_threat_feeds_comment": "Pull the same external threat-feed lists the FortiGate uses and mix a small random assortment into traffic to prove the feeds are matching. Real malicious indicators - feed targets are never fully downloaded or saved. mix_rate 0.025 = ~2.5% of connections. Set enabled=false to skip.",
+  "_threat_feeds_comment": "Pull the same external threat-feed lists the firewall uses and mix a small random assortment into traffic to prove the feeds are matching. Real malicious indicators - feed targets are never fully downloaded or saved. mix_rate 0.025 = ~2.5% of connections. Set enabled=false to skip.",
   "threat_feeds": {
     "enabled": true,
     "mix_rate": 0.025,
@@ -108,7 +468,7 @@
       "enabled": true,
       "expect": "block",
       "weight": 1,
-      "note": "EICAR anti-malware test files. Harmless. FortiGate AV should block the download.",
+      "note": "EICAR anti-malware test files. Harmless. firewall AV should block the download.",
       "urls": [
         "https://secure.eicar.org/eicar.com",
         "https://secure.eicar.org/eicar.com.txt",
@@ -502,7 +862,7 @@
     }
   },
   "dns": {
-    "_comment": "DNS traffic for FortiGate DNS filtering + Botnet C&C / DGA detection. Queries use the OS-configured resolver (through the FortiGate) unless --servers is given.",
+    "_comment": "DNS traffic for firewall DNS filtering + Botnet C&C / DGA detection. Queries use the OS-configured resolver (through the firewall) unless --servers is given.",
     "record_types": [
       "A",
       "AAAA"
@@ -510,7 +870,10 @@
     "block_ips": [
       "208.91.112.55",
       "208.91.112.52",
-      "208.91.112.53"
+      "208.91.112.53",
+      "72.5.65.111",
+      "71.19.152.112",
+      "::1"
     ],
     "dga": {
       "enabled": true,

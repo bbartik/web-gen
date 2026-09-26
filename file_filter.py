@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-file_filter.py - Exercise FortiGate File Filter (and AV) by moving an assortment
+file_filter.py - Exercise firewall File Filter (and AV) by moving an assortment
 of file *types* across the firewall in both directions:
 
   * UPLOAD  - generate small files locally with correct magic bytes (MZ/PE for
@@ -32,12 +32,14 @@ try:
 except ImportError:
     aiohttp = None
 
+import blockpages
+
 try:
     import pyzipper  # AES-encrypted zip (optional)
 except ImportError:
     pyzipper = None
 
-# FortiGate File Filter / block-page markers.
+# firewall File Filter / block-page markers.
 BLOCK_MARKERS = (
     "file blocked", "file filter", "web page blocked", "fortiguard",
     "blocked", "virus/malware detected", "high security alert",
@@ -76,7 +78,7 @@ def _make_pe(dll=False):
 
 def _make_zip(encrypted=False):
     buf = io.BytesIO()
-    payload = b"harmless test file for FortiGate file filter\n"
+    payload = b"harmless test file for file filter testing\n"
     if encrypted:
         if pyzipper is None:
             return None
@@ -91,7 +93,7 @@ def _make_zip(encrypted=False):
 
 
 def _make_gz():
-    return gzip.compress(b"harmless test file for FortiGate file filter\n")
+    return gzip.compress(b"harmless test file for file filter testing\n")
 
 
 def _make_tar():
@@ -196,7 +198,7 @@ GENERATORS = {
     "sh":   ("test-sample.sh", lambda: b"#!/bin/sh\necho harmless test\n"),
 }
 
-# Expected FortiGate action per type, for the report's pass/fail check.
+# Expected firewall action per type, for the report's pass/fail check.
 # block = should be blocked; monitor = passes but is logged; pass = not in policy.
 EXPECT = {
     "exe": "block", "dll": "block", "net": "block", "scr": "block", "msi": "block",
@@ -232,7 +234,7 @@ def generate_files(types):
 
 def _classify(status, snippet):
     low = snippet.lower()
-    if any(m in low for m in BLOCK_MARKERS):
+    if blockpages.looks_blocked(low) or any(m in low for m in BLOCK_MARKERS):
         return "blocked"
     if 200 <= status < 400:
         return "allowed"
@@ -353,7 +355,7 @@ async def _standalone(cfg, concurrency):
 
 def main():
     import argparse
-    p = argparse.ArgumentParser(description="FortiGate File Filter tester.")
+    p = argparse.ArgumentParser(description="firewall File Filter tester.")
     p.add_argument("--config", default="config.json")
     p.add_argument("--concurrency", type=int, default=20)
     args = p.parse_args()
